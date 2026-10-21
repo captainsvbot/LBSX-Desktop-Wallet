@@ -275,18 +275,24 @@ deliberate:
   another user's budget. The only shared bucket is the one an account owner
   creates deliberately by sharing their own API key or by running several
   wallets behind one NAT — and the latter is a limit the configurable RPC
-  fallback removes, since a user-supplied node has no per-IP cap.
+  fallback removes, since a user-supplied node has no per-IP cap. This holds
+  for **broadcast** as well as reads, because the fallback broadcasts
+  through `sendrawtransaction` rather than through the metered API.
 - **No single-provider dependency.** Chain access goes through a **provider
   chain**, not one hard-coded host: the primary indexer is tried first, and
   the wallet fails over automatically to a configurable BSV RPC node —
   default `https://bsv-rpc.publicnode.com`, and fully user-configurable so
   a user can point it at their own node — on failure, rate-limit
-  exhaustion, or timeout. A provider outage degrades the wallet to its
-  encrypted cache rather than taking it offline. Crucially, **a provider is
-  a source of data, never a source of trust**: headers are still validated
-  for proof of work, difficulty, linkage, median time past, and tip, and
-  transactions are still verified against the local SPV chain, whichever
-  provider answered.
+  exhaustion, or timeout. **Broadcast fails over on the same chain**, via
+  the node's `sendrawtransaction`, so a transaction the primary provider
+  refuses is retried rather than left unsent; the wallet's
+  `broadcast-uncertain` state still applies, so a broadcaster that accepts
+  a transaction and then times out is never reported as a rejection. A
+  provider outage degrades the wallet to its encrypted cache rather than
+  taking it offline. Crucially, **a provider is a source of data, never a
+  source of trust**: headers are still validated for proof of work,
+  difficulty, linkage, median time past, and tip, and transactions are still
+  verified against the local SPV chain, whichever provider answered.
 - **No auto-update channel.** `publish` is `null` in the build
   configuration and there is no `electron-updater` dependency, so the wallet
   cannot be silently updated — including by a compromised or coerced

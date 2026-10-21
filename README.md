@@ -245,14 +245,20 @@ step this project has not yet taken.
   **counterparty participation**: a token needs someone willing to list it
   before there is anything to buy, and LBSX is young. That is a network
   effect, not a missing feature.
-- **No single provider is load-bearing.** Chain access goes through a
-  **provider chain**, not one hard-coded host: the primary indexer is tried
-  first, and the wallet fails over automatically to a **user-configurable BSV
-  RPC node** — default `https://bsv-rpc.publicnode.com`, and changeable by
-  the user at any time — on failure, rate-limit exhaustion, or timeout. A
-  provider outage degrades the wallet to its encrypted local cache instead
-  of taking it offline, and a user who wants no rate limit at all can point
-  the wallet at their own node. The implementation is tracked in
+- **No single provider is load-bearing — for reads *or* for broadcast.**
+  Chain access goes through a **provider chain**, not one hard-coded host: the
+  primary indexer is tried first, and the wallet fails over automatically to a
+  **user-configurable BSV RPC node** — default `https://bsv-rpc.publicnode.com`,
+  and changeable by the user at any time — on failure, rate-limit exhaustion,
+  or timeout. **Broadcast has a fallback too.** A BSV RPC node exposes
+  `sendrawtransaction`, so a transaction that the primary provider refuses
+  (429, 5xx, or a dropped connection) is retried against the fallback node
+  rather than left unsent. This was verified against the live default node:
+  `sendrawtransaction`, `getblockheader`, and `getrawtransaction` are all
+  present and answering. A provider outage degrades the wallet to its
+  encrypted local cache instead of taking it offline, and a user who wants no
+  rate limit at all can point the wallet at their own node. The implementation
+  is tracked in
   [issue #2](https://github.com/captainsvbot/LBSX-Desktop-Wallet/issues/2).
   What is deliberately *not* claimed: a fallback provider is a **source of
   data, never a source of trust** — headers are still validated for proof of
@@ -337,7 +343,8 @@ on its own connection.**
   coded host, and the fallback RPC endpoint is **user-configurable** — a user
   running their own BSV RPC node can point the wallet at it. When the primary
   provider is slow, rate-limited, or down, the wallet fails over to the next
-  provider instead of going offline. See
+  provider instead of going offline — for **broadcast as well as reads**,
+  since the fallback node exposes `sendrawtransaction`. See
   [Provider fallback](#provider-fallback-and-where-the-75-mb-comes-from).
 - **The expensive first sync is a one-time, per-user cost, and it is
   unavoidable by design.** Each wallet's first sync downloads the ~74 MB
@@ -416,6 +423,28 @@ fallback provider is a **source of data, never a source of trust**. An
 unreachable or misbehaving provider is a degraded sync, never a compromised
 wallet.
 
+**Broadcast fails over too.** This is the part that matters most, because
+broadcast is the one operation a user cannot do by hand later. The fallback
+is a real BSV node, not a read-only mirror, and it exposes
+`sendrawtransaction` — verified live against the default node, along with
+`getblockheader` and `getrawtransaction`. So the two paths are genuinely
+covered:
+
+| Operation | Primary | Fallback | Verified on the default node |
+|---|---|---|---|
+| Header sync (SPV) | indexer block-header ranges | `getblockheader` (raw 80-byte header) | yes |
+| Transaction read | indexer tx hex / status | `getrawtransaction`, `getrawmempool` | yes |
+| Broadcast | `POST /tx/broadcast` | `sendrawtransaction` | yes (method present; a real send was not performed) |
+
+A transaction the primary provider refuses is retried against the fallback
+node instead of being left unsent, and the wallet's existing
+`broadcast-uncertain` state still applies: if a broadcaster accepts a
+transaction and then times out, the wallet keeps the transaction and its
+txid locally and reports it as uncertain rather than rejected, so a retry
+cannot create a duplicate. The rate-limit consequence is the same as for
+reads — a self-hosted node has no per-IP cap, so a user who links their own
+endpoint leaves the provider's ceilings behind entirely.
+
 The 75 MB is the *other* cost, and it is a different kind of cost from the
 provider's rate limits. Each wallet downloads the full header chain once,
 on first run, to build its own proof-of-inclusion chain. It is bandwidth
@@ -484,7 +513,9 @@ Yes, and this was measured against the live network rather than estimated.
   spends one unit per transaction against the same cap, so batching is how
   you make a large queue fit inside a small window. **A `free` API key does
   not raise this ceiling** — only `pro` and `enterprise` do; a free key
-  raises the general request budget, not the broadcast budget.
+  raises the general request budget, not the broadcast budget. **This cap
+  applies to the default provider only.** The RPC fallback broadcasts via
+  `sendrawtransaction`, and a user-supplied node has no per-IP cap at all.
 - **Status lookups are metered separately again**, at **120 per minute per
   IP**. A batch that does not fit is refused whole with HTTP 429 and
   `{"error": "tx status rate limit exceeded"}`; one valid `txid` counts as
@@ -1255,7 +1286,8 @@ These are real, current, and worth knowing before you rely on the wallet.
    automatically to a configurable BSV RPC node** when the primary provider
    is unreachable, timing out, or rate-limiting. The fallback endpoint
    defaults to `https://bsv-rpc.publicnode.com` and is user-configurable, so
-   anyone can point the wallet at their own node. The wallet degrades to its
+   anyone can point the wallet at their own node. Broadcast fails over the
+   same way, via the node's `sendrawtransaction`. The wallet degrades to its
    encrypted cache offline, but it cannot refresh balances or broadcast
    without a reachable provider. See
    [Provider fallback](#provider-fallback-and-where-the-75-mb-comes-from).
@@ -1311,8 +1343,9 @@ These are real, current, and worth knowing before you rely on the wallet.
     capped separately again at **120 per minute per IP**. Because the caps
     are per IP, separate wallets on separate connections do not contend;
     wallets sharing one NAT or carrier-grade NAT do — and the configurable
-    RPC fallback exists to route around that. See
-    [Does the wallet scale?](#3-does-the-wallet-scale).
+    RPC fallback exists to route around that, because the fallback broadcasts
+    through `sendrawtransaction` and a self-hosted node has no per-IP cap.
+    See [Does the wallet scale?](#3-does-the-wallet-scale).
 
 ---
 
