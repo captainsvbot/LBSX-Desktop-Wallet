@@ -190,6 +190,14 @@ These are load-bearing. Do not weaken them:
 7. **The discovery address stays public.** It is not a secret, and moving it
    to a config file breaks discovery. See `electron/constants.cjs` and
    `SECURITY.md`.
+8. **The wallet stays import-only.** Do not add a key-generation flow. There
+   is deliberately no `generateMnemonic` or `entropyToMnemonic` in
+   `electron/vault.cjs`, and no "create wallet" or "reveal phrase" action in
+   `src/`. The only creation path is `importVault()`. The rationale — that
+   generating a phrase is the operation most likely to cause unrecoverable
+   loss, and that the phrase is never displayed — is documented in the
+   README and `SECURITY.md`. If you believe this should change, raise it as
+   an issue first; it is a product decision, not a refactor.
 
 ### Adding a new persisted field
 

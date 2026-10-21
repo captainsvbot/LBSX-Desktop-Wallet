@@ -14,13 +14,18 @@ account, no server-side key custody, and no telemetry.
 
 This repository is the full application source. It contains **no wallet data,
 no keys, and no build artifacts** — see
-[Where wallet data is stored](#where-wallet-data-is-stored).
+[Where wallet data is stored](#what-is-stored-on-disk).
 
 ---
 
 ## Table of contents
 
 - [Why LBSX](#why-lbsx)
+- [Is it safe? Does it solve real problems? Does it scale?](#is-it-safe-does-it-solve-real-problems-does-it-scale)
+  - [1. Is the wallet safe?](#1-is-the-wallet-safe)
+  - [2. Does it solve real problems?](#2-does-it-solve-real-problems)
+  - [3. Does the wallet scale?](#3-does-the-wallet-scale)
+  - [Import-only by design: LBSX never generates a recovery phrase](#import-only-by-design-lbsx-never-generates-a-recovery-phrase)
 - [Feature overview](#feature-overview)
 - [How it works](#how-it-works)
   - [Architecture](#architecture)
@@ -55,6 +60,7 @@ wallet that is about to be used with real money:
 | Chain verification | **Local SPV header chain** | Vendor server | Full |
 | Indexer dependency | BananaBlocks (read/broadcast) | Vendor server | None |
 | Backup burden | Your recovery phrase | Vendor | Your node |
+| Key generation | **None — import only** | Vendor | Varies |
 | Open source | **Yes (MIT)** | No | Yes |
 
 The properties we optimised for:
@@ -73,6 +79,229 @@ The properties we optimised for:
   sign from an unknown or stale spend status.
 - **Everything is inspectable.** The entire sync, verification, and persistence
   path is in this repository in plain JavaScript.
+- **The wallet never generates a recovery phrase.** It has no key-generation
+  code at all. You import a BIP39 phrase you already hold — typically from
+  LocalBSV or your existing BSV wallet — and the wallet derives your keys from
+  it on your machine. See
+  [Import-only by design](#import-only-by-design-lbsx-never-generates-a-recovery-phrase)
+  for why this is a deliberate choice.
+
+---
+
+## Is it safe? Does it solve real problems? Does it scale?
+
+Three questions, answered honestly — including where the answer is "not
+yet". Numbers in this section are measured from this codebase and this
+machine, not estimated.
+
+### 1. Is the wallet safe?
+
+**Short answer: yes for the threat model it targets, and no for a few specific
+things it deliberately does not cover.** Being precise here is more useful than
+being reassuring.
+
+**What is genuinely strong:**
+
+| Control | Evidence in the code |
+|---|---|
+| The renderer cannot reach your keys | `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; the bridge in `electron/preload.cjs` is a frozen allow-list of ~35 named methods. The phrase is never a bridge argument. |
+| The phrase is encrypted at rest with a real KDF | scrypt at N=2^15, r=8, p=1 with a 64 MB memory cap, then AES-256-GCM. The memory cap is what makes it expensive, not the iteration count alone. |
+| Key material is not left lying around | `getWalletPrivateKey()` zero-fills its buffer in a `finally`. `lockVault()` nulls the phrase reference; `before-quit` locks automatically. |
+| A spendable balance is proven, not assumed | A UTXO is only "spendable" if its parent transaction carries a BEEF Merkle proof checked against a header chain this wallet validated itself, anchored at the BSV genesis header. |
+| The state file cannot be corrupted or partially written | Temp file with `0o600` + the `wx` flag, then an atomic `rename()`. A per-file write queue serialises every read-modify-write cycle. |
+| A partially broadcast transaction cannot be silently lost | `broadcastTrackedTransaction` persists the transaction **before** broadcasting, and reserves its inputs in a blocklist so a concurrent action cannot spend them twice. |
+
+**What is honestly weak, and why it is a design choice rather than an oversight:**
+
+- **Peer Chat is obfuscation, not encryption.** Its key is `sha256(ADMIN_DISCOVERY_ADDRESS)`, and that address is public in the source. Anyone can derive the key and read the messages. The app says so in the Peer Chat info popover, on the feature card, and in `SECURITY.md`. Do not use it for anything you would not publish.
+- **The wallet trusts one indexer.** Every network read and every broadcast goes to `bananablocks.com` (verified: it is the only external host referenced anywhere in `electron/`). The wallet never *trusts* that indexer for spend decisions — it verifies inclusion itself — but it does trust it for *availability* and for current unspent state.
+- **Single-signature, import-only.** There is no multisig, no hardware-wallet signing, no coin control, no recipient screening, and no auto-lock timer beyond the explicit Lock button.
+- **SPV proves inclusion, not unspentness.** The header chain proves a transaction is in a block. It does not prove an output is still unspent. The indexer remains the source of truth for that, and the wallet will not sign against an unknown or stale external spend status.
+
+**The security centre in the app** reports vault state, the active address, the
+derivation path (`m/44'/236'/0'/0/0`), and a one-click lock, so the user can
+confirm which wallet is actually open instead of assuming it.
+
+Full detail, including the complete list of non-goals, is in
+[`SECURITY.md`](./SECURITY.md).
+
+### Import-only by design: LBSX never generates a recovery phrase
+
+**This is a deliberate design choice, not a missing feature.** LBSX Desktop
+Wallet has no "create new wallet" button, and it contains no key-generation
+code at all. There is no `generateMnemonic`, no `entropyToMnemonic`, no seed
+word generator anywhere in the codebase. The only way a wallet comes into
+existence is by **importing a BIP39 recovery phrase the user already holds.**
+
+Verified in the code: `electron/vault.cjs` exposes exactly one creation path,
+`importVault()`, which validates the phrase with `bip39.validateMnemonic()`
+and refuses to run if a vault already exists. The renderer exposes exactly one
+corresponding bridge method, `importSeedPhrase`. The Security Centre in the
+app states it plainly: *"No key-generation action exists in this wallet."*
+
+**Why we made this choice:**
+
+- **It removes the single most common way people permanently lose money.** In
+  a generate-then-display flow, the wallet renders twelve or twenty-four
+  words on screen and asks the user to copy them onto paper. That is a
+  high-stakes, high-friction moment, and it is a moment the user cannot
+  independently verify: they have no existing copy to compare against, and
+  they cannot tell a correct backup from a subtly wrong one until it is too
+  late. By never generating, LBSX removes that failure mode entirely. There is
+  no phrase to mistype because there is no phrase to type.
+- **The user already has a proven backup.** An imported phrase came from
+  somewhere the user chose — a hardware wallet, a phone wallet, a written
+  backup they have already tested. Their recovery path is already established
+  and already their responsibility. LBSX inherits that path instead of
+  creating a second, competing one.
+- **It removes a whole class of disclosure risk.** A generated phrase must be
+  displayed, and therefore exists, at least momentarily, on a screen. That
+  means it can be shoulder-surfed, captured in a screenshot, exposed by a
+  screen-share, left in a clipboard, or captured by a screen recorder. An
+  imported phrase is **never displayed at all** — the app confirms this in the
+  Security Centre: *"The phrase is not displayed or copied from this screen.
+  Keep your original backup in a secure, offline location."* LBSX does not
+  show your phrase, does not offer to reveal it, and does not copy it to the
+  clipboard. It only ever validates and stores it.
+- **The wallet never becomes an issuer of your identity.** A generator is a
+  party that mints your wallet and then depends on you to protect what it
+  gave you. LBSX is deliberately a *client* of a wallet you already own. It
+  derives `m/44'/236'/0'/0/0` from a phrase you brought; it does not author
+  the phrase.
+- **It is the honest path for existing LocalBSV customers.** These users
+  already have a BSV wallet and a working recovery phrase behind it. LBSX's
+  job is to let them bring that wallet — and the funds already in it — onto
+  their own machine, with their own keys, verifiable against the chain. It is
+  not their job to create a second, parallel wallet just to use a desktop
+  app. The obligation to generate, back up, and protect a phrase is left
+  exactly where it already was: with the user, and with the wallet they
+  already use.
+
+**The trade-off, stated plainly.** A brand-new user who has never held a BSV
+wallet cannot onboard into LBSX directly, because there is no phrase for them
+to import yet. They need to bootstrap a phrase elsewhere first, or use a
+wallet that does generate. That is a real onboarding friction point, and it is
+listed in [Known limitations](#known-limitations). We accept it: the failure
+mode it prevents (a user permanently losing money to a botched backup they
+were told to make) is far more expensive than the friction it creates, and
+LBSX's audience is overwhelmingly people who already have a BSV wallet.
+
+### 2. Does it solve real problems?
+
+**Yes — but the problems it solves are specific, and in two areas the honest
+answer is "it is early".**
+
+**Real problems, genuinely solved:**
+
+- **"I do not trust a vendor with my coins."** The phrase is imported on your
+  machine, encrypted at rest, and never crosses a process boundary. There is no
+  account, no server-side custody, and no telemetry. A custodial wallet can lose
+  your balance to an outage, an insolvency, or a policy change; LBSX cannot.
+- **"I do not want to run a full node."** A full BSV node is hundreds of
+  gigabytes. LBSX validates a header chain from genesis and verifies Merkle
+  proofs against it, which is the 80-bytes-per-block subset that actually
+  matters for proving inclusion. You get cryptographic verification without the
+  disk cost or the setup burden.
+- **"Most BSV wallets treat tokens as a checkbox."** LBSX implements the
+  actual BSV-21 mechanics: a token mint that atomically carries an Ordinals
+  image, a lock that splits a balance into 1–24 time-locked tranches using
+  `OP_CHECKLOCKTIMEVERIFY`, and a claim path that matures and releases them.
+  These are the operations a real holder needs and that a generic wallet
+  omits.
+- **"I want to trade peer-to-peer without a custodian."** The order book is
+  discovered from the chain itself, anchored to a shared public address, and
+  every listing is re-verified against the live unspent `OrdLock` output before
+  a purchase is built. There is no escrow operator and no custodial float.
+- **"My wallet history should be mine."** Activity, balances, transaction
+  proofs, and peer-chat messages are stored in an encrypted, wallet-scoped
+  document under your own machine, not on someone else's account.
+- **"I want to audit it."** The full sync, verification, sign, broadcast, and
+  persistence path is plain JavaScript in this repository, and every
+  persistence-format change is covered by an offline test.
+
+**Honest "not yet":**
+
+- **The peer-to-peer trading ecosystem is a fixed point of a fixed point.** It
+  needs other LBSX users to actually list tokens, and it needs those users to
+  be online. Until then the order book is mostly empty, and a token you mint
+  has no guaranteed exit. This is the single biggest thing holding the feature
+  back, and it is a *liquidity* problem, not a code problem.
+- **The single indexer is a genuine single point of failure.** If
+  BananaBlocks is down, unreachable, or changes its API, the wallet cannot
+  read balances or broadcast. The architecture anticipates this — the code
+  refers to a single `BB_API` constant per module in every case — but no
+  alternative provider is wired in yet.
+- **No hardware-wallet support.** For a wallet meant to hold real money, a
+  USB signer is the obvious next requirement, and it is not here.
+- **Windows x64 only.** No macOS, Linux, or ARM build.
+
+### 3. Does the wallet scale?
+
+**Three different senses of "scale", with three different answers. Measured
+against this machine and this codebase:**
+
+**Does it scale in *time* (how long does a sync take)?** Yes, with one
+important caveat.
+
+- The header chain downloads 80 bytes per block. Measured on this machine:
+  **77,763,840 bytes = 74.2 MB = 972,048 headers**, i.e. the full chain from
+  genesis to the current tip.
+- Headers are fetched in parallel ranges of up to 2016 blocks, 4 concurrent
+  requests, paced at 300 ms, with retry on 429 — so the first sync is
+  bandwidth-bound, not round-trip-bound.
+- The header cache is written to `userData/spv/mainnet.headers` and is
+  **validated once, then trusted**, so subsequent syncs only fetch the new
+  blocks. A daily sync after the first is a handful of headers, not 74 MB.
+- **The caveat:** that 74.2 MB is downloaded *once*, on first run, and it
+  grows forever at 80 bytes per block (~2.6 MB/year, since BSV averages
+  roughly 10-minute blocks). That is a completely reasonable trade for full
+  inclusion proof, and it is far smaller than a full node, but it is not zero
+  and it is not zero-*growth*.
+- History sync is **incremental and cursor-paginated**: pages of 100 rows,
+  following an opaque continuation cursor, and it stops as soon as a page
+  contains no unseen txids. On an established wallet that is typically one
+  request, not a full re-scan. A cold wallet backfills up to 500 pages
+  (50,000 rows) and then records that it is complete.
+
+**Does it scale in *state size* (how big does my wallet data get)?** Yes, with
+a bounded upper bound on the hot paths.
+
+- The encrypted state document is a single JSON blob. Measured on this
+  machine after real use: **3.63 MB**.
+- The growth drivers are all explicitly capped in the code:
+  `observedBsvUtxos` → 5,000; admin index transactions → 5,000; admin pending
+  → 1,000; activity detail lookups per sync → 500; Peer Chat feed → the last
+  150 messages; BEEF proof size → 32 MB ceiling.
+- Activity rows are **merged by txid, not appended** — a re-sync of a known
+  transaction updates the existing row rather than adding one, so repeated
+  syncs do not grow the file.
+- The cost is that the whole document is re-serialised and re-encrypted on
+  every write, and the write is serialised through one queue. At 3.6 MB that
+  is a few milliseconds; at 100 MB it would not be. This is fine for a
+  personal wallet and would need a different storage engine for a high-volume
+  one.
+
+**Does it scale in *reach* (how many users, how much throughput)?** This is
+where the honest answer is **not yet**, and it is worth being blunt:
+
+- Every user is a **read-mostly client of one indexer**. The wallet does not
+  run a node, does not serve other wallets, and does not shard. Peak load is
+  whatever BananaBlocks can serve.
+- Each wallet's first sync is a ~74 MB header download. Ten thousand new
+  users on the same day is ten thousand header downloads, even though the
+  bytes are identical for all of them.
+- The app is a single desktop process with a **single in-memory write queue
+  per state file** and a **single global SPV sync promise**. That is correct
+  and safe for one wallet, and it is not designed for multi-tenant or
+  server-side use.
+- There is no fee market and no priority routing; broadcast is first-come.
+
+**The bottom line on scale:** the wallet scales well for **individual users
+and modest numbers of users**. It does not yet scale as a *shared
+infrastructure*, and it is not trying to be one — it is a desktop wallet, and
+the honest framing is that a 74 MB one-time download and a single indexer are
+reasonable trade-offs for a personal wallet, while a serious exchange or a
+validator would need a different design.
 
 ---
 
@@ -80,7 +309,7 @@ The properties we optimised for:
 
 | Area | What it does |
 |---|---|
-| **Vault** | Import an existing BIP39 phrase. Two lock modes: a local password (scrypt + AES-256-GCM) or passwordless OS key-store encryption. |
+| **Vault** | Import an existing BIP39 phrase. There is **no** key-generation flow, by design. Two lock modes: a local password (scrypt + AES-256-GCM) or passwordless OS key-store encryption. |
 | **Overview** | Confirmed/unconfirmed BSV balance, spendable BSV, BSV-21 holdings, one-tap balance sync with live progress. |
 | **Assets** | Per-token balance, send, receive (QR), and the time-lock locker. |
 | **Send / Receive** | BSV payments with an optional public note, or a BSV-21 token transfer. |
@@ -469,11 +698,21 @@ current design and is documented in `SECURITY.md`.
 
 ### Vault and key custody
 
-LBSX is an **import-only** wallet. There is no key-generation flow, and that
-is a deliberate choice: generating a phrase is the one operation where a
-subtle bug can produce a wallet whose owner cannot recover the funds.
+LBSX is an **import-only** wallet. There is no key-generation flow at all —
+no `generateMnemonic`, no seed generator anywhere in the codebase — and that
+is a deliberate choice. Generating a phrase is the one operation where a
+subtle bug, a mistyped backup, or a shoulder-surfed screen can produce a
+wallet whose owner can never recover the funds. LBSX removes that failure
+mode by never asking you to trust a phrase it produced.
+
+The full reasoning, including why this suits existing LocalBSV customers
+specifically, is in
+[Import-only by design](#import-only-by-design-lbsx-never-generates-a-recovery-phrase).
 
 - **Derivation path:** `m/44'/236'/0'/0/0` (BIP44, BSV coin type 236).
+- **The phrase is never displayed.** The wallet validates it, derives from
+  it, and stores it encrypted — it has no "reveal phrase" or "copy phrase"
+  function anywhere in the UI.
 - **Password mode** enforces a minimum of 12 characters. The KDF is scrypt
   with N=2^15, r=8, p=1 and a 64 MB memory cap.
 - **Device mode** uses `safeStorage.encryptString`. If the OS key store is
@@ -764,6 +1003,14 @@ These are real, current, and worth knowing before you rely on the wallet.
    are not yet verified elsewhere.
 9. **No hardware-wallet, multi-sig, or coin-control support.**
 10. **The indexer sees your addresses.** There is no privacy layer.
+11. **No key generation.** LBSX cannot create a wallet for you; you must
+    already hold a BIP39 phrase. This is a deliberate
+    [design choice](#import-only-by-design-lbsx-never-generates-a-recovery-phrase),
+    but it does mean a first-time BSV user cannot onboard into LBSX without
+    bootstrapping a phrase elsewhere first.
+12. **The first sync downloads the full header chain** — about 74 MB on
+    mainnet today, growing by 80 bytes per block. Subsequent syncs are
+    incremental. See [Does the wallet scale?](#3-does-the-wallet-scale).
 
 ---
 

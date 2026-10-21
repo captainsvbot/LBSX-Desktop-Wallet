@@ -122,7 +122,28 @@ system's key store and the account it belongs to. On Linux, Electron's
 `basic_text` backend is explicitly detected and rejected because it is not
 encrypted by a real key store.
 
-### 7. No additional protections are offered
+### 7. The wallet does not generate recovery phrases
+
+LBSX contains **no key-generation code**. There is no `generateMnemonic`, no
+`entropyToMnemonic`, and no seed-phrase generator anywhere in the codebase.
+The only way a wallet comes into existence is by importing a BIP39 phrase the
+user already holds.
+
+This is a deliberate design choice with a security rationale: generating a
+phrase is the operation most likely to cause permanent, unrecoverable loss
+(a botched paper backup, a mistyped word, a screenshot, a screen share), and
+an imported phrase comes with a recovery path the user has already
+established and tested.
+
+The phrase is **never displayed**. The wallet validates it, derives from it,
+and stores it encrypted. There is no "reveal phrase" or "copy phrase" action
+in the UI.
+
+**The trade-off:** a first-time BSV user with no existing phrase cannot
+onboard directly and must bootstrap one elsewhere first. This is listed in
+the README's Known limitations.
+
+### 8. No additional protections are offered
 
 - No multi-signature support.
 - No hardware wallet or cold-storage signing.
