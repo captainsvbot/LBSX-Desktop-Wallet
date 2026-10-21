@@ -107,6 +107,18 @@ Balance, history, and token reads are address-based. BananaBlocks (and
 anything able to observe traffic to it) learns which addresses you query and
 when. There is no privacy layer, no coin mixing, and no address rotation.
 
+The indexer is also a **choke point for availability**, and it meters
+broadcasting separately from reads. The broadcast route is capped at **10
+transactions per minute per IP**, counted in transactions rather than
+requests, and status lookups are capped at **120 per minute per IP**. A
+`free` API key raises the read budget but not the broadcast budget. Because
+these caps are per IP, separate wallets on separate connections do not
+contend with one another — but wallets sharing a single NAT, a carrier-grade
+NAT, or one cloud region share a bucket and are capped together. An
+attacker who can force a user behind a shared IP cannot steal the user's
+funds or read the vault, but can slow that user's ability to broadcast
+while the wallet is in use.
+
 ### 4. SPV proves inclusion, not unspentness
 
 The local header chain proves that a transaction was included in a block on a
@@ -233,6 +245,52 @@ model, and it is deliberately handled in a conservative way:
 Adding one would need care: the announcement must remain *advisory*, and the
 spend-based UTXO check must remain authoritative, or a third party could
 suppress a live listing by broadcasting a forged cancel record.
+
+### 10. Each wallet is its own infrastructure
+
+LBSX Desktop Wallet has **no server-side component of any kind**. There is no
+LBSX-operated backend, no account system, no shared relay, and no telemetry.
+This is a security property, not only an operational one, and it is
+deliberate:
+
+- **No user data is pooled.** Every installation holds its own key material
+  and its own encrypted state file, and every network request originates
+  from that user's own machine. There is no multi-tenant backend where one
+  user's address, balance, or transaction could be mixed into another
+  user's request, and no shared database that could be breached to expose
+  many wallets at once. A compromise of one user's machine compromises that
+  user alone.
+- **Key material never leaves the machine.** Minting a BSV-21 token,
+  creating a time-lock, and claiming a locked token are all signed locally
+  with the user's own key. The deploy script, the embedded icon inscription,
+  the lock output, and every signature are produced on the user's machine;
+  the only network step is broadcasting a transaction that is already
+  finished and signed. There is no service that holds, escrow, or
+  co-signs anything on the user's behalf.
+- **No shared rate-limit bucket.** The indexer's limit is **per IP**, and
+  each wallet reaches it from its own connection. Users do not contend for
+  one another's request allowance, and one user syncing hard cannot exhaust
+  another user's budget. The only shared bucket is the one an account owner
+  creates deliberately by sharing their own API key.
+- **No auto-update channel.** `publish` is `null` in the build
+  configuration and there is no `electron-updater` dependency, so the wallet
+  cannot be silently updated — including by a compromised or coerced
+  distribution point. Updating requires the user to obtain and run a new
+  build, which is a conscious act. This is also why a build is not signed:
+  see the README's known limitations.
+- **No phone-home of any kind.** The dependency list contains no analytics,
+  tracking, or crash-reporting SDK. The only external host the wallet
+  contacts is the public indexer, and only for data the user asked it to
+  fetch.
+- **No inbound surface.** The Electron main process opens no listening
+  socket, so the wallet cannot be reached by another machine on the local
+  network, and there is no remote-control or RPC channel into a running
+  wallet.
+
+The trade-off is that the wallet's cost is paid by the person using it, on
+their own hardware: the 74 MB header download, the local SPV validation, and
+the request pacing all happen on the user's machine. That is the same
+property that makes it private, and it is worth keeping both.
 
 ---
 

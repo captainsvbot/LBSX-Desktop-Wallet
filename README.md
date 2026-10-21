@@ -310,6 +310,58 @@ where the honest answer is **not yet**, and it is worth being blunt:
   and safe for one wallet, and it is not designed for multi-tenant or
   server-side use.
 - There is no fee market and no priority routing; broadcast is first-come.
+- **Broadcasting has its own, tighter ceiling than the read API**, and it
+  is worth being explicit about because it is the number that actually
+  bounds user throughput: **10 transactions per minute per IP**. A wallet
+  broadcasting one transaction a minute sits well inside that. Ten thousand
+  wallets each broadcasting one transaction a minute also fit — because the
+  cap is per IP and each wallet has its own connection, so the 10,000
+  requests spread across 10,000 buckets rather than landing in one. What
+  does not work is many wallets behind a **single shared IP**: a single
+  office NAT, a mobile carrier's CGNAT, or a cloud region can put thousands
+  of users in one bucket and cap them together at 10 transactions per
+  minute. `POST /tx/broadcast/multi` batches up to 100 raw transactions
+  into a single request, spending one unit per transaction against the same
+  cap, which is how a busy shared-IP user fits a burst into a small window.
+  The `X-API-Key` tier raises the *read* budget, but only `pro` and
+  `enterprise` raise the broadcast budget — a `free` key leaves it at 10.
+
+**Does each wallet carry its own infrastructure? Yes — completely.** This is
+the structural fact that makes the wallet scale the way it does, and it is
+worth stating plainly because it is unusual:
+
+- **There is no LBSX-operated server.** The only external host the wallet
+  contacts is the public BananaBlocks indexer. There is no backend, no
+  account system, no shared relay, and no proxy in front of the user's
+  connection — requests leave directly from the user's own machine.
+- **Every user runs the full stack locally.** Their own SPV header chain
+  (cached in `userData/spv/mainnet.headers`), their own encrypted vault,
+  their own local transaction index, their own sync loop, their own order
+  book view. Nothing is computed centrally on their behalf.
+- **The token tooling is local too.** Minting a BSV-21 token, locking one in
+  the time-lock locker, and claiming it back are all performed on the
+  user's machine with the user's own key: the deploy script, the embedded
+  icon inscription, the lock output, and the signatures are all built
+  locally, and the only network step is broadcasting the finished
+  transaction. The token's metadata is read from the chain, but the token
+  is *created* by the user, not by a service.
+- **Users do not share a wallet, and they do not share a connection.** Each
+  installation holds its own key material and its own encrypted state file,
+  and each one reaches the indexer from its own IP address. There is no
+  multi-tenant backend that could mix one user's data into another's
+  request, and there is no shared rate-limit bucket to contend over.
+- **There is no auto-updater and no telemetry.** `publish` is `null` in the
+  build configuration, there is no `electron-updater` dependency, and the
+  dependency list contains no analytics or crash-reporting SDK. The wallet
+  does not phone home for anything, and it cannot be updated without the
+  user obtaining and running a new build.
+- **No inbound surface.** The Electron main process opens no listening
+  socket, so the wallet cannot be reached by another machine on the network.
+
+The practical consequence is that the wallet's cost to its user does not
+grow with the number of other users, and the project has no server-side
+scaling problem to solve. The cost of using LBSX is paid by the person using
+it, on their own hardware, on their own connection.
 
 **Does it scale in *discovery* (can one address carry the whole order book)?**
 Yes, and this was measured against the live network rather than estimated.
@@ -348,20 +400,49 @@ Yes, and this was measured against the live network rather than estimated.
   3,000, and `enterprise` at 12,000 — and that allowance is **shared across
   the whole account**, so adding more keys does not raise it. The key is
   stored encrypted in the OS key store and sent only to `bananablocks.com`
-  as `X-API-Key`. The raw listing is fast; the detail phase is the
-  bottleneck, and it is a rate limit, not an algorithmic one.
+  as `X-API-Key`.
+- Because the limit is **per IP**, and every wallet reaches the indexer
+  from its own machine and its own connection, **rate-limit buckets do not
+  contend between users**: one person syncing hard does not consume another
+  person's budget. The only way several users share a bucket is if they
+  deliberately share one API key, and even then the shared allowance is
+  the account's, not a global pool. The raw listing is fast; the detail
+  phase is the bottleneck, and it is a rate limit, not an algorithmic one.
 - The listing *verification* step is what makes this safe rather than merely
   fast. The order book is not trusted because the indexer reported it; each
   candidate is re-checked against the live chain — the `OrdLock` must decode
   to the same token id, amount, seller, and price, and the locked output must
   still be unspent. A forged or stale record does not reach the order book.
+- **Broadcasting is metered separately, and much more tightly.** The
+  broadcast route proxies to an external ARC, so it carries its own cap
+  rather than drawing on the general API budget: **10 transactions per minute
+  per IP**, counted in *transactions*, not requests.
+  `POST /tx/broadcast/multi` accepts up to 100 raw transactions per batch and
+  spends one unit per transaction against the same cap, so batching is how
+  you make a large queue fit inside a small window. **A `free` API key does
+  not raise this ceiling** — only `pro` and `enterprise` do; a free key
+  raises the general request budget, not the broadcast budget.
+- **Status lookups are metered separately again**, at **120 per minute per
+  IP**. A batch that does not fit is refused whole with HTTP 429 and
+  `{"error": "tx status rate limit exceeded"}`; one valid `txid` counts as
+  one lookup.
+- Because every one of these caps is **per IP** and every wallet makes its
+  own connection from its own machine, a wallet broadcasting one transaction
+  a minute sits comfortably inside the broadcast cap, and many such wallets
+  do not draw on one shared budget. The practical exception is several
+  wallets behind one shared NAT or carrier-grade NAT, which land in the same
+  bucket — see
+  [Known limitations](#known-limitations).
 
 **The bottom line on scale:** the wallet scales well for **individual users
 and modest numbers of users**. It does not yet scale as a *shared
 infrastructure*, and it is not trying to be one — it is a desktop wallet, and
 the honest framing is that a 74 MB one-time download and a single indexer are
 reasonable trade-offs for a personal wallet, while a serious exchange or a
-validator would need a different design.
+validator would need a different design. The mitigating factor is that
+**there is no shared infrastructure to scale**: each wallet is its own
+infrastructure, so user growth adds load to the public indexer and nothing
+else.
 
 ---
 
@@ -1147,6 +1228,17 @@ These are real, current, and worth knowing before you rely on the wallet.
     incremental. See [Does the wallet scale?](#3-does-the-wallet-scale).
 14. **No third-party security audit.** See
     [On audits](#2-does-it-solve-real-problems).
+15. **Broadcasting is capped at 10 transactions per minute per IP.** The
+    broadcast route is metered separately from the rest of the API and
+    counts *transactions*, not requests. `POST /tx/broadcast/multi` takes up
+    to 100 raw transactions per batch and spends one unit per transaction
+    against the same cap, so a queue of a hundred transactions fits in one
+    window. A `free` API key does **not** raise this ceiling — only `pro`
+    and `enterprise` do. Status lookups are capped separately again at
+    **120 per minute per IP**. Because the caps are per IP, separate
+    wallets on separate connections do not contend; wallets sharing one
+    NAT or carrier-grade NAT do. See
+    [Does the wallet scale?](#3-does-the-wallet-scale).
 
 ---
 
