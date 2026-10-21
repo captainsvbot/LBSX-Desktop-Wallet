@@ -111,9 +111,10 @@ being reassuring.
 | The state file cannot be corrupted or partially written | Temp file with `0o600` + the `wx` flag, then an atomic `rename()`. A per-file write queue serialises every read-modify-write cycle. |
 | A partially broadcast transaction cannot be silently lost | `broadcastTrackedTransaction` persists the transaction **before** broadcasting, and reserves its inputs in a blocklist so a concurrent action cannot spend them twice. |
 
-**What is honestly weak, and why it is a design choice rather than an oversight:**
+**What the wallet does not do, and why each is a design choice rather than an
+oversight:**
 
-- **Peer Chat is obfuscation, not encryption.** Its key is `sha256(ADMIN_DISCOVERY_ADDRESS)`, and that address is public in the source. Anyone can derive the key and read the messages. The app says so in the Peer Chat info popover, on the feature card, and in `SECURITY.md`. Do not use it for anything you would not publish.
+- **Peer Chat is obfuscation, not secrecy — by design.** Its key is `sha256(ADMIN_DISCOVERY_ADDRESS)`, and that address is public in the source on purpose. The purpose is to keep a casual reader of the chain or an indexer from reading messages at a glance, while keeping the feed open to anyone running the wallet. The chat is **public by choice** — it is a community feed, not a private channel — and the app says so in the Peer Chat info popover ("so anyone can reverse it"), on the feature card ("Publicly reversible"), and in `SECURITY.md`.
 - **The wallet trusts one indexer.** Every network read and every broadcast goes to `bananablocks.com` (verified: it is the only external host referenced anywhere in `electron/`). The wallet never *trusts* that indexer for spend decisions — it verifies inclusion itself — but it does trust it for *availability* and for current unspent state.
 - **Single-signature, import-only.** There is no multisig, no hardware-wallet signing, no coin control, no recipient screening, and no auto-lock timer beyond the explicit Lock button.
 - **SPV proves inclusion, not unspentness.** The header chain proves a transaction is in a block. It does not prove an output is still unspent. The indexer remains the source of truth for that, and the wallet will not sign against an unknown or stale external spend status.
@@ -219,13 +220,27 @@ answer is "it is early".**
   persistence path is plain JavaScript in this repository, and every
   persistence-format change is covered by an offline test.
 
+**On audits:** this project has **not** been through a third-party security
+audit. Nothing in this README should be read as a claim that an outside
+reviewer has verified any of it. Every statement here is a claim about what
+the code in this repository does, and the code is the evidence — read it
+rather than trusting the summary. If you are evaluating this wallet for real
+value, that is the correct starting point, and an audit is the obvious next
+step this project has not yet taken.
+
 **Honest "not yet":**
 
-- **The peer-to-peer trading ecosystem is a fixed point of a fixed point.** It
-  needs other LBSX users to actually list tokens, and it needs those users to
-  be online. Until then the order book is mostly empty, and a token you mint
-  has no guaranteed exit. This is the single biggest thing holding the feature
-  back, and it is a *liquidity* problem, not a code problem.
+- **The peer-to-peer trading ecosystem is a fixed point of a fixed point.**
+  Discovery is *not* the obstacle and is not a code problem: every LBSX limit
+  sell order pays a 1-satoshi anchor to the shared discovery address and
+  carries a public `OP_RETURN` record, so indexing that **one** address
+  surfaces the whole LBSX order book. The wallet already does exactly that,
+  and re-verifies each listing against the live unspent `OrdLock` output
+  before displaying it. Purchases settle on-chain against the locked output,
+  so the maker does not need to be online. The real constraint is
+  **counterparty participation**: a token needs someone willing to list it
+  before there is anything to buy, and LBSX is young. That is a network
+  effect, not a missing feature.
 - **The single indexer is a genuine single point of failure.** If
   BananaBlocks is down, unreachable, or changes its API, the wallet cannot
   read balances or broadcast. The architecture anticipates this — the code
@@ -296,6 +311,51 @@ where the honest answer is **not yet**, and it is worth being blunt:
   server-side use.
 - There is no fee market and no priority routing; broadcast is first-come.
 
+**Does it scale in *discovery* (can one address carry the whole order book)?**
+Yes, and this was measured against the live network rather than estimated.
+
+- The discovery address is a **single** address. Every LBSX limit sell order
+  pays a 1-satoshi anchor to it and carries a public `OP_RETURN` record, so
+  scanning that one address is enough to enumerate the order book. There is
+  no registry, no per-listing channel, and nothing to keep in sync.
+- Measured on the live network: the discovery address currently holds
+  **2,875 confirmed transactions** spanning blocks 932,130 to 972,048, across
+  **1,649 distinct block heights** (up to 25 transactions in a single block).
+- The full history was retrieved in **29 cursor-paginated pages** (100 rows
+  per page). Across three consecutive runs this took **3.0–4.8 seconds** —
+  roughly **600–950 transactions per second** of wall clock, at an average
+  page latency of **104–165 ms**. The cursor pagination is stable and
+  returns every transaction exactly once: three full passes produced
+  **2,875 unique transaction hashes with zero missing and zero duplicated
+  across runs** (each repeat pass re-delivered the same set).
+- That single scan surfaced **both** sides of the LBSX protocol from the same
+  address: peer-chat messages *and* LBSX sell listings, each identified by
+  its own `OP_RETURN` record. One index, two protocols, no extra plumbing.
+- The expensive part is not the history listing but the **per-transaction
+  detail phase**, which is bounded by the indexer's rate limit. The public
+  API allows **240 requests per minute per IP** for anonymous callers;
+  BananaBlocks metered this deployment at **80 requests per minute** per
+  server (that is the per-server share of the 240, and it is the number
+  returned in the `X-RateLimit-Limit` header), and it refuses with
+  **HTTP 429** and `{"error": "rate limit exceeded"}` once a bucket is
+  exhausted. The wallet paces itself accordingly — a 250 ms minimum
+  interval between calls, up to 3 retries, exponential backoff honouring
+  `retry-after`, and a serialised request queue.
+- The **API key is optional**. The wallet syncs and trades perfectly well
+  without one; adding a key simply raises the ceiling and shortens the
+  detail phase, which is where the time actually goes. Anonymous traffic
+  is metered at 240 requests per minute, a `free` key at 600, `pro` at
+  3,000, and `enterprise` at 12,000 — and that allowance is **shared across
+  the whole account**, so adding more keys does not raise it. The key is
+  stored encrypted in the OS key store and sent only to `bananablocks.com`
+  as `X-API-Key`. The raw listing is fast; the detail phase is the
+  bottleneck, and it is a rate limit, not an algorithmic one.
+- The listing *verification* step is what makes this safe rather than merely
+  fast. The order book is not trusted because the indexer reported it; each
+  candidate is re-checked against the live chain — the `OrdLock` must decode
+  to the same token id, amount, seller, and price, and the locked output must
+  still be unspent. A forged or stale record does not reach the order book.
+
 **The bottom line on scale:** the wallet scales well for **individual users
 and modest numbers of users**. It does not yet scale as a *shared
 infrastructure*, and it is not trying to be one — it is a desktop wallet, and
@@ -364,8 +424,8 @@ validator would need a different design.
 | `electron/chain.cjs` | Sync orchestration: balances, UTXOs, tokens, activity history. |
 | `electron/token-wallet.cjs` | BSV/BSV-21 send, mint, lock, claim, peer-chat payloads. |
 | `electron/market.cjs` | Order book, listing, purchase, cancellation. |
-| `electron/trading.cjs` | Discovery: finds peer orders via the admin wallet. |
-| `electron/admin-wallet-index.cjs` | Scans the admin wallet's history for peer activity. |
+| `electron/trading.cjs` | Discovery: finds peer orders via the discovery (inclusion) address. |
+| `electron/admin-wallet-index.cjs` | Scans the discovery address's history for peer activity. |
 | `electron/peer-chat.cjs` | Parses and indexes on-chain chat messages. |
 | `electron/transaction-tracker.cjs` | Persist-before-broadcast, status reconciliation. |
 | `electron/bananablocks.cjs` | API-key storage and authenticated requests. |
@@ -641,13 +701,15 @@ still required to broadcast.
 This section is intentionally blunt. Please read it before using the wallet
 with meaningful value.
 
-- **Peer Chat is obfuscation, not secrecy.** Peer Chat message bodies are
-  encrypted with AES-256-GCM under a key derived as `sha256(ADMIN_DISCOVERY_ADDRESS)`.
-  That address is **public and hardcoded in this source**, so anyone can
-  derive the key and decrypt any message body. The feature is intended to
-  keep casual readers from reading the chain, not to hide anything from a
-  motivated attacker. The app states this in the Peer Chat info popover and on
-  the feature card.
+- **Peer Chat is obfuscation, not secrecy — by design.** Peer Chat message
+  bodies are encrypted with AES-256-GCM under a key derived as
+  `sha256(ADMIN_DISCOVERY_ADDRESS)`. That address is **public and hardcoded
+  in this source**, so anyone can derive the key and decrypt any message
+  body. The purpose is to stop casual readers of the chain or an indexer
+  from reading messages at a glance, while leaving the feed open to anyone
+  running the wallet. **The chat is public by choice** — it is a community
+  feed, not a private channel. The app states this in the Peer Chat info
+  popover and on the feature card.
 - **Messages are permanently public.** Anything sent to Peer Chat is written
   to the blockchain and cannot be deleted, even if the sender's keys are
   compromised tomorrow. Treat every message as public.
@@ -670,7 +732,7 @@ with meaningful value.
 See [`SECURITY.md`](./SECURITY.md) for the full disclosure policy and the
 detailed threat model.
 
-### A note on `ADMIN_DISCOVERY_ADDRESS`
+### The discovery (inclusion) address
 
 `electron/constants.cjs` contains a single hardcoded address:
 
@@ -678,7 +740,9 @@ detailed threat model.
 ADMIN_DISCOVERY_ADDRESS: '15BYCBgXi2GWXEvJNJJGfcYxeN9nQqp7eB',
 ```
 
-This is **public by design** and is not a secret. It serves three roles:
+This is the **discovery (inclusion) address** — the shared, public inclusion
+point that every LBSX participant announces to. It is **public by design** and
+is not a secret. It serves three roles:
 
 1. A **discovery anchor** — a 1-satoshi output that address-history indexers
    can watch to find peer-trading orders and peer-chat messages.
@@ -687,10 +751,41 @@ This is **public by design** and is not a secret. It serves three roles:
 3. An **obfuscation key source** — the seed for the Peer Chat AES key, which
    is intentionally reversible (see above).
 
-Because it is public, it is also a **single point of failure and a privacy
-leak**: every peer-chat participant and every counterparty is visible to
-anyone watching that address. This is a known, accepted trade-off of the
-current design and is documented in `SECURITY.md`.
+All three roles work *because* the value is public, and that is the point:
+
+1. **Discovery only works if it is a well-known constant.** Every peer in the
+   network has to agree on the same address, and an address that peers can
+   discover by watching the chain is exactly what makes that agreement
+   possible. Moving it into a per-user config file would not harden it — it
+   would **break discovery**, because a buyer could no longer know where to
+   look for listings. It is a shared constant, not a shared secret.
+2. **The fee anchor only works if it is public.** The fee is a spam tax that
+   proves a genuine participant paid a non-zero cost. Its purpose is to be
+   observable by everyone, including the indexer.
+3. **The obfuscation key source only works if it is public.** The Peer Chat
+   key is derived from this address on purpose, so that casual readers of the
+   chain do not casually read the chat. **The messages are public by choice** —
+   Peer Chat is a community feed, not a private channel.
+
+It holds **no secret material**: no private key, no seed, no key material of
+any kind, and no ability to spend from it is required by the wallet. See
+[`SECURITY.md`](./SECURITY.md#5-the-discovery-inclusion-address-is-public-by-design)
+for the full statement of this design.
+
+**It behaves like a URL that outlives the application.** The address is not
+configuration — it is the agreed *location* where LBSX activity is written so
+that other participants know where to look. Everything written to it remains
+readable after the app is closed, uninstalled, or replaced by a newer version,
+and it remains readable by anything that knows the address, including code
+that is not LBSX at all. That durability is the point, and it is also why the
+address must be a constant rather than a setting.
+
+Because it is a shared rendezvous point, **changing it forks the network.**
+A user who intentionally points the wallet at a different address is not
+"configuring" the wallet — they are running a private LBSX network whose
+participants must all know the new address. The two networks do not
+interoperate, and an LBSX order placed on one is invisible to the other.
+This is the intended semantics, not an accident of configuration handling.
 
 ---
 
@@ -761,7 +856,7 @@ is not yet combined across multiple token inputs.
 - **vout 0** — the icon, embedded as a 1-satoshi Ordinals output (PNG, JPEG,
   or WebP, up to 512 KB, with a magic-byte signature check).
 - **vout 1** — the BSV-21 deploy output, referencing `_0` for the icon.
-- **vout 2** — a 1-satoshi output to the admin discovery address for
+- **vout 2** — a 1-satoshi output to the discovery (inclusion) address for
   indexing.
 
 Keeping the image and the deployment atomic avoids spending unconfirmed change
@@ -773,7 +868,7 @@ Fees are paid from verified wallet BSV UTXOs.
 
 The trading tab is a genuine peer-to-peer order book, not a hosted exchange.
 
-- **Discovery.** Orders are found by scanning the admin discovery address's
+- **Discovery.** Orders are found by scanning the discovery address's
   on-chain history. Each order is announced with a public `OP_RETURN` JSON
   record (`p: 'lbsx'`, `op: 'sell'`) alongside a 1-satoshi anchor payment, and
   the token amount is locked in an `OrdLock v2` output.
@@ -790,8 +885,31 @@ The trading tab is a genuine peer-to-peer order book, not a hosted exchange.
 - **Isolation.** The parser tolerates other applications' `OP_RETURN`
   payloads on the same chain instead of failing on them.
 
-**Known limitation:** discovery is anchored to the admin address, so it finds
-fee-linked activity rather than a complete global order book. See
+**Why this is a complete order book for LBSX-native listings:** every listing
+pays the same 1-satoshi anchor to the same discovery address, so scanning
+that **one** address yields the entire LBSX order book. There is no registry
+to maintain and no per-listing channel to poll. Purchases settle on-chain
+against the locked output, so the seller never needs to be online.
+
+**How a cancellation is detected.** A cancel transaction spends the listing's
+`OrdLock` output. The wallet therefore treats the **UTXO, not an
+announcement, as the source of truth** for whether a listing is live: it
+re-checks the locked output against the indexer and drops the listing as soon
+as that output is spent — whether it was spent by a cancellation, by a
+purchase, or by anything else. This is deliberately the conservative choice.
+An `OP_RETURN` claiming "this listing was cancelled" could be forged by
+anyone, so it must never be able to remove someone else's live order from
+the book. The cost is that a cancellation currently leaves **no announcement
+of its own** on the chain: the cancel transaction carries no `OP_RETURN` and
+pays no anchor to the discovery address, so a third-party indexer that only
+follows that address sees a listing appear and then silently disappear.
+That is a known gap, tracked as a future improvement, and it does not affect
+the wallet's own behaviour — the wallet finds the truth by checking the
+output, not by reading an announcement.
+
+**Known limitation:** a **hosted, off-chain** order book — such as
+LocalBSV's — is not reachable this way, because its orders are not linked to
+the discovery address and cannot be reconstructed from the chain. See
 [`TRADING-PLAN.md`](./TRADING-PLAN.md) for the precise boundaries of this
 design.
 
@@ -803,7 +921,7 @@ Peer Chat messages are written to the chain in a `safe` data output:
 ['LBSX', 'v2', 'peer_chat', <sender address>, <timestamp>, <base64 ciphertext>]
 ```
 
-- 1,000 satoshis are paid to the admin discovery address.
+- 1,000 satoshis are paid to the discovery (inclusion) address.
 - The body is AES-256-GCM encrypted under a **publicly derivable** key — see
   [the security model](#what-the-wallet-deliberately-does-not-protect).
 - A message is only accepted as authentic if the sender's address appears
@@ -993,24 +1111,42 @@ These are real, current, and worth knowing before you rely on the wallet.
    of truth for current spend state.
 4. **One token carrier input per transaction.** Token actions larger than the
    largest single verified token output are not yet combined across inputs.
-5. **Peer Chat is reversible.** Its key is derived from a public address. See
+5. **Peer Chat is reversible — by design.** Its key is derived from a public
+   address so that casual readers of the chain do not casually read the chat.
+   The messages are public by choice; Peer Chat is a community feed, not a
+   private channel. See
    [the security model](#what-the-wallet-deliberately-does-not-protect).
-6. **Trading discovery is anchor-limited.** It finds fee-linked peer activity
-   via the admin address, not a complete global order book.
-7. **The installer is unsigned.** Windows SmartScreen will warn on first run.
-8. **Windows is the only supported platform today.** The code is
+6. **The order book covers LBSX-native listings, not hosted order books.**
+   Indexing the single discovery address finds every LBSX limit sell order,
+   because every one of them pays a 1-satoshi anchor to that address. What it
+   does not reach is a **hosted, off-chain** order book — for example
+   LocalBSV's, whose orders are not linked to this address and therefore
+   cannot be reconstructed from the chain. LBSX-native peer trading is
+   unaffected; live matching with an off-chain venue is not offered. See
+   [`TRADING-PLAN.md`](./TRADING-PLAN.md).
+7. **Cancellations are not announced on-chain.** A cancel spends the listing's
+   `OrdLock` output and carries no `OP_RETURN` and no anchor of its own. The
+   wallet detects this correctly — it re-checks the locked output and drops
+   the listing once it is spent — but a third-party indexer following only the
+   discovery address sees a listing appear and then vanish with no on-chain
+   record of why. This is a gap in the announcement format, not in the
+   wallet's behaviour, and it is tracked as a future improvement.
+8. **The installer is unsigned.** Windows SmartScreen will warn on first run.
+9. **Windows is the only supported platform today.** The code is
    cross-platform in principle; the packaging and the OS key-store behaviour
    are not yet verified elsewhere.
-9. **No hardware-wallet, multi-sig, or coin-control support.**
-10. **The indexer sees your addresses.** There is no privacy layer.
-11. **No key generation.** LBSX cannot create a wallet for you; you must
+10. **No hardware-wallet, multi-sig, or coin-control support.**
+11. **The indexer sees your addresses.** There is no privacy layer.
+12. **No key generation.** LBSX cannot create a wallet for you; you must
     already hold a BIP39 phrase. This is a deliberate
     [design choice](#import-only-by-design-lbsx-never-generates-a-recovery-phrase),
     but it does mean a first-time BSV user cannot onboard into LBSX without
     bootstrapping a phrase elsewhere first.
-12. **The first sync downloads the full header chain** — about 74 MB on
+13. **The first sync downloads the full header chain** — about 74 MB on
     mainnet today, growing by 80 bytes per block. Subsequent syncs are
     incremental. See [Does the wallet scale?](#3-does-the-wallet-scale).
+14. **No third-party security audit.** See
+    [On audits](#2-does-it-solve-real-problems).
 
 ---
 

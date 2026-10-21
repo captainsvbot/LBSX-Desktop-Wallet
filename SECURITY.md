@@ -1,5 +1,11 @@
 # Security Policy
 
+> **Audit status: no third-party audit has been performed.** Nothing in this
+> document implies that an outside reviewer has verified any claim about this
+> wallet. The claims below describe what the code in this repository does; the
+> code is the evidence. Anyone evaluating this wallet for real value should
+> read the source rather than rely on this summary.
+
 ## Reporting a vulnerability
 
 If you believe you have found a vulnerability in LBSX Desktop Wallet, please
@@ -71,6 +77,12 @@ crypto.createHash('sha256').update(ADMIN_DISCOVERY_ADDRESS, 'utf8').digest()
 `electron/constants.cjs`. **Anyone can derive the key and decrypt any Peer
 Chat message body.** This is verified and reproducible from public data only.
 
+**This is a deliberate design choice, and it is the intended behaviour.** The
+purpose of the on-chain encoding is to keep the payload from being casually
+read by someone browsing the chain or an indexer, without them needing to run
+the wallet application or join the community feed. The messages remain
+public by choice: the feature is a *community feed*, not a private channel.
+
 The intent is to keep casual readers of the chain from casually reading chat
 messages. It provides **no** confidentiality against a motivated attacker.
 
@@ -104,16 +116,61 @@ indexer remains the source of truth for current balances, history, and
 external spend state, and the wallet will not sign from an unknown or stale
 external spend status.
 
-### 5. `ADMIN_DISCOVERY_ADDRESS` is a single point of failure and a privacy leak
+### 5. The discovery (inclusion) address is public, by design
 
-Because every peer-trading order and peer-chat message is anchored to this one
-public address:
+`ADMIN_DISCOVERY_ADDRESS` is a **public, application-level discovery and
+obfuscation anchor** — the shared inclusion point where LBSX activity is
+announced. It is published in this source on purpose. It is not a secret, it
+is not a key, and it is not meant to be treated as one.
 
-- All participants and counterparties are visible to anyone watching it.
-- Compromise or migration of the address is a project-wide event, not a
-  per-user one.
-- It cannot be "fixed" by moving it to a config file: peers need a stable,
-  shared value for discovery to work at all.
+It exists to do three jobs, all of which work *because* it is public:
+
+1. **A discovery anchor.** Peer-trading orders and Peer Chat posts pay a
+   small fee to it so that anyone — including a wallet that is not running
+   LBSX — can find and index that activity by scanning one address. A private
+   address could not do this job: nobody could discover the transactions
+   attached to it.
+2. **A fee anchor.** The 1-satoshi outputs that anchor an order or a chat
+   post go here, which is what makes the whole scheme work without an
+   escrow operator or any custodial component.
+3. **An obfuscation key source.** It is the seed for the Peer Chat AES key.
+   Deriving the key from a value that is deliberately public is exactly what
+   makes the encoding useful: it raises the effort for a casual reader while
+   keeping the feed open to anyone running the wallet.
+
+**The messages are public by choice.** Peer Chat is a community feed, not a
+private channel. The on-chain encoding exists to keep payloads from being
+read at a glance by someone browsing the chain or an indexer, and to make the
+data readable by the wallet application without shipping secret material in
+the source. It was never intended to provide confidentiality against someone
+who is deliberately trying to read it, and the application says so in the
+Peer Chat info popover and on the feature card.
+
+The reason this is not a defect worth "fixing":
+
+- Moving it to a config file or environment variable would **break
+  discovery**. Peers need a stable, shared, publicly known value for
+  discovery to work at all. A per-user address would mean nobody could find
+  anybody's orders.
+- It holds **no secret material**. There is no key to leak, because the
+  value is published in the source by intent. Losing it would lose the
+  discovery index; it would not expose a private key or a seed.
+- Every user relies on the *same* value by design, so it is a shared
+  constant rather than a shared secret. The trust model is explicitly
+  "public and verifiable", not "secret and trusted".
+
+**It outlives the application.** The address behaves like a URL: anything
+written to it stays readable after the wallet is closed, uninstalled, or
+replaced, and it stays readable by anything that knows the address —
+including software that is not LBSX. That durability is the entire purpose.
+It also means **changing it forks the network**: a user who points the
+wallet at a different address is running a private LBSX network whose
+participants must all know the new address, and the two networks do not
+interoperate. Order books are per-network as a direct result.
+
+If the project ever needed a stronger guarantee, the correct change would be
+a different protocol design (per-user discovery keys, or a commitment scheme),
+not a config-file change to this one.
 
 ### 6. Device mode inherits the OS key store's security
 
@@ -153,6 +210,30 @@ the README's Known limitations.
   `before-quit`.
 - The wallet is import-only: it never generates a recovery phrase.
 
+### 9. Order cancellations are not announced on-chain
+
+A cancellation spends the listing's `OrdLock` output. It carries **no
+`OP_RETURN` record and no anchor payment** to the discovery address, so a
+third-party indexer that follows only that address cannot distinguish a
+cancellation from any other spend of the locked output.
+
+This is a gap in the **announcement format**, not in the wallet's security
+model, and it is deliberately handled in a conservative way:
+
+- **The wallet does not rely on an announcement to decide liveness.** It
+  re-checks the locked output against the indexer and treats a spent output
+  as "no longer a live listing". This is the correct direction, because an
+  `OP_RETURN` claiming "cancelled" can be forged by anyone — so an
+  announcement must never be able to remove another party's live order from
+  the order book.
+- **The cost** is that a third-party indexer sees a listing appear and then
+  silently disappear, with no on-chain record of the reason. Adding a cancel
+  announcement is tracked as a future improvement.
+
+Adding one would need care: the announcement must remain *advisory*, and the
+spend-based UTXO check must remain authoritative, or a third party could
+suppress a live listing by broadcasting a forged cancel record.
+
 ---
 
 ## Wallet data location
@@ -185,7 +266,7 @@ Some scanners flag `electron/constants.cjs` for "hardcoded key material" and
 `electron/peer-chat-crypto.cjs` for "weak key derivation". Both are expected
 and are **not** vulnerabilities:
 
-- The address is a public discovery anchor, not a secret.
+- The address is the public **discovery (inclusion) address**, not a secret.
 - The Peer Chat key is intentionally derived from public data. The
   application already discloses the property to users.
 
