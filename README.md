@@ -1,113 +1,783 @@
 # LBSX Desktop Wallet
 
-See [TRADING-PLAN.md](./TRADING-PLAN.md) for the local-first peer-trading design and the limits of admin-wallet discovery.
+**Local-first BSV and BSV-21 desktop wallet for Windows.** Keys never leave your
+computer, balances are verified against your own SPV header chain, and BSV-21
+tokens, locks, peer trading, and peer chat are built and signed locally.
 
-LBSX Desktop Wallet is a local-first Electron wallet for BSV and BSV-21 assets. Private keys are derived and used on this device; BananaBlocks provides public chain reads and transaction broadcasts.
+> **Version 1.2.1** (shown in the app as `v1.2.01`) · MIT licensed · Windows x64
+> · Electron 39 + React 18 + Vite 6
 
-## Current foundation
+LBSX Desktop Wallet is a local-first Electron wallet for BSV and BSV-21 assets.
+Private keys are derived and used on this device; [BananaBlocks](https://bananablocks.com/)
+provides public chain reads and transaction broadcasts. There is no hosted
+account, no server-side key custody, and no telemetry.
 
-- First run opens the import screen. Only existing BIP39 phrases can be imported; there is no phrase/key generation flow.
-- Validate and derive the BSV mainnet address in Electron's main process using `m/44'/236'/0'/0/0`.
-- Choose either a vault password (scrypt + AES-256-GCM; prompt on each launch) or passwordless opening (encrypted by the OS user key store; opens automatically for the same OS account). The renderer does not receive the phrase back from the main process.
-- Sync BSV balances, address UTXOs, and BSV-21 holdings from BananaBlocks with a visible button on Overview and Assets. Confirmed cash/token inputs are checked against BEEF transaction-inclusion proofs and a locally validated mainnet header chain, then saved with transaction bytes and outpoints in the encrypted wallet store. The first SPV sync downloads and validates headers in bounded ranges; later syncs check the remote tip and reconcile reorganizations. Transaction builders use cached inputs first, so wallet-created transaction chains and already-verified parents do not need to be fetched again. BananaBlocks remains necessary to refresh balances and current unspent status, discover missing inputs, and broadcast.
-- Import any BSV-21 token by its full origin ID in Trading. Imports are wallet-scoped and remain available in the market selector even when the wallet has no balance for that token.
-- Each synced token in Assets has **Send**, **Receive**, and **Locker** actions. Receive shows a QR code and the wallet's public BSV address.
-- BSV-21 token transfers, marketplace purchases, and CLTV locker transactions are built and signed in Electron's main process, then broadcast through BananaBlocks. Token carrier outputs are kept separate from ordinary P2PKH fee inputs; accepted local change can fund a follow-up send or purchase before confirmation.
-- Activity refresh retrieves confirmed and unconfirmed address history, records locally initiated wallet actions, updates transaction status, and incrementally backfills transaction details without repeatedly fetching known details. After a complete initial backfill, refresh scans newest history pages until it reaches a page with no unseen transaction IDs; it does not use a five-old-transaction threshold. Rows merge by txid, so already-loaded transactions are not duplicated, and detail requests are limited to new rows, changed confirmation heights, or previous lookup failures. Pending local transactions are also checked against BananaBlocks transaction status when address history still reports height zero, so a mined transaction can update Activity and its local UTXO state without waiting for the history index to catch up. It follows BananaBlocks continuation cursors for up to 500 index pages and 500 transaction details per refresh, paces requests, retries rate limits, and preserves failed/deferred lookups and the encrypted page cursor for later refreshes. The ledger shows six saved entries per page, clearly labels partial history as loaded so far, shows the latest cached BSV balance, and provides per-transaction net debit, change, and fee details when available.
-- **BSV-21 Tools → Mint a token** creates a fixed-supply `deploy+mint` token in one transaction. A PNG, JPEG, or WebP image (up to 512 KB) is embedded as a 1-satoshi Ordinals output at vout 0; the token output at vout 1 references `_0`, followed by a separate 1-satoshi output to the existing admin discovery address for indexing. Keeping the image and deployment atomic avoids spending unconfirmed change between broadcasts. Network fees are paid from verified wallet BSV UTXOs.
-- Token icons referenced by BSV-21 `_0` metadata are extracted from the wallet's locally tracked parent transaction first, with BananaBlocks transaction hex used only when the image transaction is not cached. The same icon appears in Overview, Assets, and the Trading market selector.
-- Imported tokens, Activity, verified/observed UTXOs, pending transactions, and locker records are stored per wallet in an AES-256-GCM encrypted local file. The encryption key is derived from the wallet seed and held only while the vault is unlocked. Existing plaintext locker records are migrated on first wallet-data load.
-- Wallet-created transactions are persisted locally before broadcast, including raw transaction bytes, input and output outpoints, and spend/reservation state. This supports local transaction chaining after sync. BananaBlocks remains necessary for refreshing balances and external spend state, discovering missing inputs, marketplace/indexer data, and broadcasting transactions; an encrypted cache is not a substitute for current network state.
-- The wallet UI includes Overview, Assets, Trading, BSV-21 Tools, Send, Receive, Activity, Security, and BananaBlocks API key settings in the dark, green-accented LBSX style.
-- Transaction IDs, BSV-21 token IDs, and outpoints link to their BananaBlocks explorer pages. Each reference has a dedicated copy control; Assets displays each token's complete origin ID.
-- Balance-sync progress remains visible through spendable cash/token verification after header validation. Repeated balance-sync requests are coalesced, and validated header caches are reused.
-- BananaBlocks requests work anonymously by default. An optional API key can be configured in the wallet's **API key** tab and is encrypted with the operating system's secure storage. When enabled, the key is sent only to BananaBlocks in the `X-API-Key` header. An internet connection is needed to sync public balances.
+This repository is the full application source. It contains **no wallet data,
+no keys, and no build artifacts** — see
+[Where wallet data is stored](#where-wallet-data-is-stored).
 
-## Where wallet data is stored
+---
 
-All wallet state lives in the Electron `userData` directory, **never inside the
-project folder** and never in the repository. On Windows this resolves to:
+## Table of contents
+
+- [Why LBSX](#why-lbsx)
+- [Feature overview](#feature-overview)
+- [How it works](#how-it-works)
+  - [Architecture](#architecture)
+  - [The sync → verify → save pipeline](#the-sync--verify--save-pipeline)
+  - [How data is saved after syncing](#how-data-is-saved-after-syncing)
+  - [What is stored on disk](#what-is-stored-on-disk)
+  - [Atomic writes and concurrency](#atomic-writes-and-concurrency)
+  - [SPV header chain and reorganisation handling](#spv-header-chain-and-reorganisation-handling)
+- [Security model](#security-model)
+- [Feature deep dives](#feature-deep-dives)
+- [Installation](#installation)
+- [Development](#development)
+- [Testing](#testing)
+- [Project layout](#project-layout)
+- [Known limitations](#known-limitations)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Why LBSX
+
+Most BSV wallets fall into one of two camps: custodial web wallets, or
+full-node SPV clients that download and verify the entire chain.
+
+LBSX takes a third path that we think is the right trade-off for a desktop
+wallet that is about to be used with real money:
+
+| | LBSX | Custodial web wallet | Full node |
+|---|---|---|---|
+| Key custody | **Local, yours** | Vendor server | Local |
+| Chain verification | **Local SPV header chain** | Vendor server | Full |
+| Indexer dependency | BananaBlocks (read/broadcast) | Vendor server | None |
+| Backup burden | Your recovery phrase | Vendor | Your node |
+| Open source | **Yes (MIT)** | No | Yes |
+
+The properties we optimised for:
+
+- **Keys are yours, always.** The recovery phrase is imported on your machine,
+  encrypted at rest, and decrypted only in Electron's main process. The
+  renderer never receives it. There is no key-generation flow and no server
+  copy of your seed.
+- **The wallet verifies for itself.** A spendable balance is not "what the API
+  said" — it is a UTXO whose parent transaction carries a BEEF Merkle proof
+  that the wallet checked against a header chain it validated itself, anchored
+  at the BSV genesis block.
+- **The cache is an accelerator, not an oracle.** The encrypted local store
+  makes repeat syncs fast and lets the wallet chain unconfirmed transactions.
+  It never substitutes for current network state, and the wallet refuses to
+  sign from an unknown or stale spend status.
+- **Everything is inspectable.** The entire sync, verification, and persistence
+  path is in this repository in plain JavaScript.
+
+---
+
+## Feature overview
+
+| Area | What it does |
+|---|---|
+| **Vault** | Import an existing BIP39 phrase. Two lock modes: a local password (scrypt + AES-256-GCM) or passwordless OS key-store encryption. |
+| **Overview** | Confirmed/unconfirmed BSV balance, spendable BSV, BSV-21 holdings, one-tap balance sync with live progress. |
+| **Assets** | Per-token balance, send, receive (QR), and the time-lock locker. |
+| **Send / Receive** | BSV payments with an optional public note, or a BSV-21 token transfer. |
+| **Activity** | Encrypted, wallet-scoped ledger with per-transaction net debit, change, and fee. Paginated 6 rows per page. |
+| **Trading** | Peer-to-peer BSV-21 order book: list, buy, cancel, and live order discovery. |
+| **BSV-21 Tools** | Mint a fixed-supply BSV-21 token with an embedded PNG/JPEG/WebP icon, atomically. |
+| **Peer Chat** | On-chain messages anchored to a shared discovery address. |
+| **Security center** | Vault status, active address, derivation path, and one-click lock. |
+| **API key** | Optional BananaBlocks API key, encrypted with the OS key store. |
+
+---
+
+## How it works
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Renderer  (src/*.jsx, sandboxed)                            │
+│  React UI. Never sees the phrase, the private key, or raw    │
+│  key material. Receives only the public address + summary.   │
+└───────────────────────────┬──────────────────────────────────┘
+                            │  contextBridge (electron/preload.cjs)
+                            │  frozen, allow-listed API surface
+┌───────────────────────────▼──────────────────────────────────┐
+│  Main process  (electron/*.cjs)                              │
+│  ┌──────────┐  ┌───────────┐  ┌────────┐  ┌──────────────┐  │
+│  │  vault   │  │ wallet-   │  │  spv   │  │ token-wallet │  │
+│  │ (keys)   │  │   data    │  │ (chain)│  │  (BSV-21)    │  │
+│  └────┬─────┘  └─────┬─────┘  └───┬────┘  └──────┬───────┘  │
+│       │               │             │              │          │
+│  ┌────▼───────────────▼─────────────▼──────────────▼───────┐  │
+│  │  chain.cjs · trading.cjs · market.cjs · peer-chat.cjs   │  │
+│  │  transaction-tracker.cjs · admin-wallet-index.cjs       │  │
+│  └───────────────────────┬──────────────────────────────────┘  │
+└──────────────────────────┼──────────────────────────────────┘
+                           │ HTTPS
+                  ┌────────▼─────────┐
+                  │   BananaBlocks   │  indexer + node + broadcast
+                  └──────────────────┘
+```
+
+**Key files**
+
+| File | Responsibility |
+|---|---|
+| `electron/main.cjs` | App lifecycle, window hardening, all IPC handlers. |
+| `electron/preload.cjs` | The only renderer↔main bridge. Frozen allow-list. |
+| `electron/vault.cjs` | Key custody: import, unlock, lock, derivation, key material. |
+| `electron/wallet-data.cjs` | Encrypted persistence: the per-wallet state file. |
+| `electron/spv.cjs` | Header chain validation, BEEF proof verification, reorgs. |
+| `electron/chain.cjs` | Sync orchestration: balances, UTXOs, tokens, activity history. |
+| `electron/token-wallet.cjs` | BSV/BSV-21 send, mint, lock, claim, peer-chat payloads. |
+| `electron/market.cjs` | Order book, listing, purchase, cancellation. |
+| `electron/trading.cjs` | Discovery: finds peer orders via the admin wallet. |
+| `electron/admin-wallet-index.cjs` | Scans the admin wallet's history for peer activity. |
+| `electron/peer-chat.cjs` | Parses and indexes on-chain chat messages. |
+| `electron/transaction-tracker.cjs` | Persist-before-broadcast, status reconciliation. |
+| `electron/bananablocks.cjs` | API-key storage and authenticated requests. |
+| `electron/explorer.cjs` | Validated BananaBlocks explorer deep links. |
+| `electron/constants.cjs` | The public discovery address. |
+
+### The sync → verify → save pipeline
+
+This is the heart of the wallet. A **balance sync** is the following sequence:
+
+```
+  ┌─ 1. RECONCILE ────────────────────────────────────────────┐
+  │  Scan locally tracked transactions for a definitive        │
+  │  rejection and release their reserved inputs.              │
+  └──────────────────────────────┬─────────────────────────────┘
+                                 ▼
+  ┌─ 2. FETCH (3 requests in parallel) ───────────────────────┐
+  │  GET /bsv/main/address/{addr}/balance                     │
+  │  GET /address/{addr}/tokens                                │
+  │  GET /bsv/main/address/{addr}/unspent?limit=500            │
+  └──────────────────────────────┬─────────────────────────────┘
+                                 ▼
+  ┌─ 3. OBSERVE (unverified) ─────────────────────────────────┐
+  │  The raw unspent list is recorded as "observed" UTXOs.     │
+  │  These are a hint, NOT a spendable balance.                │
+  │  If the response was complete (<500 rows), any verified     │
+  │  UTXO missing from it is marked spent.                     │
+  └──────────────────────────────┬─────────────────────────────┘
+                                 ▼
+  ┌─ 4. VERIFY (SPV) ─────────────────────────────────────────┐
+  │  For each candidate UTXO:                                  │
+  │    a. Ensure the local header chain is current.            │
+  │    b. Fetch the parent transaction's BEEF proof.           │
+  │    c. Check the Merkle proof against the header chain.     │
+  │    d. Check PoW, difficulty, linkage, MTP, and the tip.    │
+  │    e. Confirm the output script + value match the cache.   │
+  │  Only now is a UTXO marked verified + spendable.          │
+  └──────────────────────────────┬─────────────────────────────┘
+                                 ▼
+  ┌─ 5. CACHE (encrypted) ────────────────────────────────────┐
+  │  Verified BSV UTXOs, verified token UTXOs, and their BEEF  │
+  │  proofs are written to the encrypted wallet-data file.     │
+  └──────────────────────────────┬─────────────────────────────┘
+                                 ▼
+  ┌─ 6. SNAPSHOT ─────────────────────────────────────────────┐
+  │  A single chain snapshot is written: balance, token list,  │
+  │  spendable/pending sat totals, per-section timestamps,    │
+  │  and per-section error strings.                            │
+  └────────────────────────────────────────────────────────────┘
+```
+
+Two design points worth calling out:
+
+- **Observed ≠ verified.** The indexer's unspent list is stored in a separate
+  `observedBsvUtxos` bucket precisely so that unverified data can never be
+  mistaken for spendable funds. Only rows in `bsvUtxos` / `tokenUtxos` with
+  `verified: true` (and, for confirmed outputs, `spvVerified: true`) can be
+  spent.
+- **Failure is partial, not total.** Each of the three fetch sections records
+  its own error string. A token outage does not erase your BSV balance, and a
+  UTXO verification failure does not discard the rest of the cache. The
+  snapshot records all three error slots independently.
+
+### How data is saved after syncing
+
+Everything below is written to **one encrypted file per wallet address**:
+`%APPDATA%\lbsx-desktop-wallet\wallet-data\<sha256(address)>.enc`.
+
+The on-disk envelope is:
+
+```json
+{
+  "version": 1,
+  "addressHash": "e308f0d…2a4bd",
+  "iv": "<base64, 12 random bytes>",
+  "tag": "<base64, 16-byte GCM auth tag>",
+  "ciphertext": "<base64, AES-256-GCM ciphertext of the JSON state>"
+}
+```
+
+The plaintext inside that envelope is the wallet's entire state document:
+
+```jsonc
+{
+  "version": 1,
+  "address": "1ABC…",
+
+  // ── What the wallet owns ────────────────────────────────────
+  "importedTokens": [],       // BSV-21 tokens the user added by origin ID
+  "tokenLocks": [],           // locker records (tranche, schedule, txid, status)
+
+  // ── The ledger ──────────────────────────────────────────────
+  "activities": [],           // merged activity rows, keyed by txid
+  "transactions": [],         // wallet-created txs: raw hex, inputs, outputs, status
+
+  // ── Spendable state ─────────────────────────────────────────
+  "bsvUtxos": [],             // verified BSV UTXOs (script + raw tx bytes)
+  "tokenUtxos": [],           // verified BSV-21 UTXOs (token id + amount)
+  "observedBsvUtxos": [],     // indexer's unspent list — NOT verified
+  "proofs": [],               // BEEF proofs, keyed by txid
+
+  // ── Chain position ──────────────────────────────────────────
+  "chainSnapshot": null,      // last successful balance snapshot
+  "headerChain": null,        // tip height, tip hash, chain work, digest
+
+  // ── Sync bookkeeping ────────────────────────────────────────
+  "lastActivitySyncAt": null,
+  "lastTransactionStatusCheckAt": null,
+  "lastUtxoSyncAt": null,
+  "historyBackfillComplete": false,
+  "historyCursor": null,      // opaque BananaBlocks continuation cursor
+  "historyPageCursor": 0,
+  "historyBackfillQueue": [], // refs still awaiting a detail lookup
+
+  // ── Peer Chat cache ─────────────────────────────────────────
+  "peerChatMessages": [],
+  "peerChatLastScannedTxid": null,
+  "peerChatSyncedAt": null,
+
+  // ── Admin-wallet discovery index ────────────────────────────
+  "adminWalletTransactions": [],
+  "adminWalletPendingTransactions": [],
+  "adminWalletLastScannedTxid": null,
+  "adminWalletSyncedAt": null,
+  "adminWalletHistoryCursor": null,
+  "adminWalletHistoryComplete": false
+}
+```
+
+**The write path, in order:**
+
+1. `updateWalletData(address, updater)` acquires a per-file write queue.
+2. The current file is read and decrypted.
+3. Your `updater` mutates the in-memory state.
+4. `validateData()` re-checks the shape, the version, and that the state's
+   address matches the requested address. Optional fields are sanitised and
+   defaulted.
+5. The state is serialised, encrypted with AES-256-GCM under a fresh random
+   12-byte IV, and written to a temp file with mode `0o600` and the `wx` flag
+   (exclusive create).
+6. The temp file is `rename()`d over the target. `rename` is atomic on both
+   NTFS and POSIX filesystems, so a crash mid-write can never leave a
+   half-written state file.
+7. If any step fails, the temp file is unlinked and the error propagates.
+
+**The encryption key** is derived with HKDF-SHA256 from the BIP39 seed:
+
+```
+HKDF-SHA256(
+  ikm  = bip39.mnemonicToSeedSync(mnemonic),
+  salt = "LBSX Desktop Wallet local data v1",
+  info = "wallet-data encryption",
+  len  = 32
+)
+```
+
+Because the key comes from the seed, the state file is useless without the
+recovery phrase. It is also why the wallet cannot read its own cache while
+locked — that is intentional.
+
+**What gets written when**
+
+| Trigger | What is written |
+|---|---|
+| Balance sync | `observedBsvUtxos`, verified `bsvUtxos`/`tokenUtxos`, `proofs`, `chainSnapshot`, `lastUtxoSyncAt` |
+| Activity sync | `activities`, `transactions`, `historyCursor`, `historyPageCursor`, `historyBackfillQueue`, `historyBackfillComplete`, `lastActivitySyncAt` |
+| Transaction status check | `transactions[].status`, `lastTransactionStatusCheckAt` |
+| SPV header sync | `spv/mainnet.headers` (separate file), `headerChain`, `proofs` |
+| Token send / mint / lock | `transactions`, `activities`, `tokenLocks`, `bsvUtxos`, `chainSnapshot` |
+| Peer Chat sync | `peerChatMessages`, `peerChatLastScannedTxid`, `peerChatSyncedAt` |
+| Trading discovery | `adminWalletTransactions`, `adminWalletPendingTransactions`, `adminWalletHistoryCursor` |
+
+### What is stored on disk
+
+All wallet state lives in the Electron `userData` directory, **never inside
+the project folder** and never in the repository. On Windows this resolves to:
 
 ```
 %APPDATA%\lbsx-desktop-wallet\
 ```
 
 | File | Contents | Protection |
-|------|----------|------------|
-| `wallet-vault.json` | The BIP39 recovery phrase | AES-256-GCM with a scrypt-derived key, or Electron `safeStorage` (OS key store) in passwordless mode |
-| `wallet-data\<address-hash>.enc` | Per-wallet encrypted state: imported tokens, activity ledger, verified/observed UTXOs, pending transactions, BEEF proofs, SPV header chain, locker records | AES-256-GCM, keyed from the wallet seed while the vault is unlocked |
-| `bananablocks-api-key.json` | Optional BananaBlocks API key | Encrypted with Electron `safeStorage`; sent only to `bananablocks.com` in the `X-API-Key` header |
-| `spv\mainnet.headers` | Cached BSV mainnet block headers | Public chain data only |
-| `trading-chain-cache.json` | Trading discovery cache | Public chain data only |
+|---|---|---|
+| `wallet-vault.json` | The BIP39 recovery phrase | **v2 password mode:** scrypt (N=2^15, r=8, p=1, 64 MB maxmem) → AES-256-GCM with a 16-byte salt, 12-byte IV, 16-byte tag. **v2 device mode:** Electron `safeStorage` (OS key store). Legacy v1 envelopes still decrypt. |
+| `wallet-data\<sha256(address)>.enc` | The entire per-wallet state document described above | AES-256-GCM, HKDF-SHA256 key derived from the wallet seed, available only while the vault is unlocked |
+| `bananablocks-api-key.json` | Optional BananaBlocks API key | Electron `safeStorage`; sent only to `bananablocks.com` as `X-API-Key` |
+| `spv\mainnet.headers` | Cached BSV mainnet block headers | Public chain data only, unencrypted |
+| `token-locks.json` | Legacy locker records | Migrated into the encrypted store on first load, then removed from use |
 
 The recovery phrase and the private key never leave the main process. The
-renderer receives only the derived public address and the wallet summary.
+renderer receives only the derived public address and the wallet summary. When
+the wallet locks (manually, or on `before-quit`), the in-memory phrase
+reference is nulled and the derived key buffers are zero-filled.
 
 To remove every trace of a wallet, delete the `lbsx-desktop-wallet` folder in
-`%APPDATA%` (or `%APPDATA%/LBSX Desktop Wallet` for an installed build) and
+`%APPDATA%` (or `%APPDATA%\LBSX Desktop Wallet` for an installed build) and
 clear the app's OS key-store entry if passwordless mode was used.
 
-### What is not in this repository
+### Atomic writes and concurrency
 
-- No keys, recovery phrases, mnemonics, or private keys.
-- No wallet databases, vault files, or API keys.
-- No `.env`, `.npmrc`, `.pem`, or credential files.
-- Test scripts use only the published BIP39 test vector
-  (`abandon … about`), synthetic keys derived from `Buffer.alloc`, and a
-  placeholder API key.
-- The only hardcoded blockchain values are **public**: the BSV genesis hash
-  and header, and the shared admin discovery address
-  (`15BYCBgXi2GWXEvJNJJGfcYxeN9nQqp7eB`), which is an application-level
-  obfuscation key for peer-chat payloads and is not a secret.
-- `release-windows-*/`, `release/`, and `dist/` are build output and are
-  excluded by `.gitignore`.
+Two independent mechanisms keep the state file consistent:
 
-## Install on Windows
+- **Per-file write queue.** `updateWalletData()` chains each mutation onto a
+  promise stored in a `Map` keyed by file path. A read-modify-write cycle
+  never interleaves with another, so two concurrent syncs cannot clobber each
+  other's changes. `getWalletData()` awaits any in-flight write before
+  reading.
+- **Atomic replace.** Writes go to a uniquely named temp file and are
+  `rename()`d into place. There is no window where the state file is
+  truncated or partially written.
 
-Run `npm run dist:win` on a Windows development machine to create the v1.2.1 Windows installer in `release-windows-1.2.1/`. The installer adds Start menu and desktop shortcuts and launches the wallet when installation finishes. Users can then open **LBSX Desktop Wallet** like any other desktop application; they do not need to open a command prompt. The installer is currently unsigned, so Windows may show its standard unknown-publisher prompt. The package version is the valid SemVer `1.2.1`; the wallet UI presents it as `v1.2.01`.
+This matters because a balance sync, an activity sync, and a transaction
+broadcast can all write to the same file at once.
 
-## Run in development
+### SPV header chain and reorganisation handling
 
-On Windows, double-click **Run Wallet.bat**. It installs the project packages on first run and opens the desktop app. Node.js LTS is required for this development build.
+The wallet maintains its own copy of the BSV mainnet header chain and uses it
+to check BEEF proofs. It is not a full node: it does not validate every
+transaction, only that the transactions it spends from were included in a
+block on the chain it has independently validated.
 
-For a terminal:
+- **Anchored at genesis.** The chain starts from the BSV genesis hash and
+  header, both hardcoded as public constants.
+- **Bounded ranges.** Headers are downloaded in ranges of at most 2,016
+  blocks, with up to 4 ranges in flight, 300 ms between requests, and 3
+  retries per request. The first sync may take several minutes and reports
+  live progress in the UI.
+- **Full validation per range.** Each header is checked for proof of work
+  against the difficulty target, correct linkage to its predecessor, a valid
+  median-time-past, and a timestamp no more than 2 hours in the future. The
+  running chain work is accumulated as a BigInt.
+- **Fork rules respected.** The BSV cash fork (height 478,559) and the DAA
+  activation (height 504,032) are both encoded.
+- **Reorgs are detected, not assumed away.** On each sync the wallet compares
+  its local tip against the remote tip. If the hashes disagree it walks back
+  to find the **common ancestor**, truncates the cache to the last aligned
+  boundary, re-validates the surviving prefix, and continues from there.
+  Cached proofs that no longer sit on the canonical chain are invalidated.
+- **Proofs are versioned.** Header validation is at version 3 and BEEF proof
+  validation at version 1. A cache written by an older build is detected and
+  rebuilt rather than trusted.
+
+SPV proves **inclusion**, not **unspentness**. The indexer remains the source
+of truth for balances, history, and external spend state, and BananaBlocks is
+still required to broadcast.
+
+---
+
+## Security model
+
+### What the wallet protects
+
+- **Key custody.** The phrase is encrypted at rest with a key derived either
+  from your password (scrypt + AES-256-GCM) or from the OS key store
+  (`safeStorage`). It is decrypted only in the main process, held in a
+  module-level variable, and zeroed on lock.
+- **Renderer isolation.** `contextIsolation: true`, `nodeIntegration: false`,
+  `sandbox: true`. The renderer is served a frozen, allow-listed API through
+  `contextBridge` and has no Node access. All window-opening is denied, and
+  navigation is blocked except the dev server or the packaged `file://` page.
+- **Local data encryption.** The whole state document is encrypted at rest
+  with a seed-derived key, so the file is unreadable without the phrase.
+- **Content Security Policy.** The packaged renderer runs under a strict CSP:
+  `default-src 'self'`, `script-src 'self'`, `object-src 'none'`,
+  `base-uri 'self'`, `frame-uri 'none'`.
+- **SPV-verified spending.** The wallet refuses to sign from a UTXO it has
+  not independently verified.
+- **Write safety.** Atomic file replacement and per-file write queues prevent
+  a corrupt or lost state file.
+
+### What the wallet deliberately does *not* protect
+
+This section is intentionally blunt. Please read it before using the wallet
+with meaningful value.
+
+- **Peer Chat is obfuscation, not secrecy.** Peer Chat message bodies are
+  encrypted with AES-256-GCM under a key derived as `sha256(ADMIN_DISCOVERY_ADDRESS)`.
+  That address is **public and hardcoded in this source**, so anyone can
+  derive the key and decrypt any message body. The feature is intended to
+  keep casual readers from reading the chain, not to hide anything from a
+  motivated attacker. The app states this in the Peer Chat info popover and on
+  the feature card.
+- **Messages are permanently public.** Anything sent to Peer Chat is written
+  to the blockchain and cannot be deleted, even if the sender's keys are
+  compromised tomorrow. Treat every message as public.
+- **On-chain notes are public.** The optional payment note on a BSV send is
+  written as a public `OP_RETURN`. A tip announcement also embeds the
+  recipient's wallet address in the message body, which is permanently
+  public and linkable.
+- **The indexer can see your address.** Balance and history reads are
+  address-based, so BananaBlocks learns which addresses you query and when.
+  There is no privacy layer or coin mixing.
+- **No transaction screening.** The wallet does not filter recipients for
+  sanctions or policy. That responsibility stays with the user.
+- **The OS key store is the OS key store.** Device mode inherits the
+  security of the OS account and its key store. On Linux, Electron's
+  `basic_text` backend is explicitly detected and rejected, because it is not
+  encrypted by a real key store.
+- **No multi-sig, no hardware wallet, no signing policy.** This is a
+  single-signature, single-recovery-phrase wallet.
+
+See [`SECURITY.md`](./SECURITY.md) for the full disclosure policy and the
+detailed threat model.
+
+### A note on `ADMIN_DISCOVERY_ADDRESS`
+
+`electron/constants.cjs` contains a single hardcoded address:
+
+```js
+ADMIN_DISCOVERY_ADDRESS: '15BYCBgXi2GWXEvJNJJGfcYxeN9nQqp7eB',
+```
+
+This is **public by design** and is not a secret. It serves three roles:
+
+1. A **discovery anchor** — a 1-satoshi output that address-history indexers
+   can watch to find peer-trading orders and peer-chat messages.
+2. A **fee anchor** — peer chat and trading transactions pay 1,000 satoshis
+   to it, so a genuine participant pays a small, non-zero cost.
+3. An **obfuscation key source** — the seed for the Peer Chat AES key, which
+   is intentionally reversible (see above).
+
+Because it is public, it is also a **single point of failure and a privacy
+leak**: every peer-chat participant and every counterparty is visible to
+anyone watching that address. This is a known, accepted trade-off of the
+current design and is documented in `SECURITY.md`.
+
+---
+
+## Feature deep dives
+
+### Vault and key custody
+
+LBSX is an **import-only** wallet. There is no key-generation flow, and that
+is a deliberate choice: generating a phrase is the one operation where a
+subtle bug can produce a wallet whose owner cannot recover the funds.
+
+- **Derivation path:** `m/44'/236'/0'/0/0` (BIP44, BSV coin type 236).
+- **Password mode** enforces a minimum of 12 characters. The KDF is scrypt
+  with N=2^15, r=8, p=1 and a 64 MB memory cap.
+- **Device mode** uses `safeStorage.encryptString`. If the OS key store is
+  unavailable, the wallet refuses to use device mode and says so.
+- **Locking** nulls the in-memory phrase. `before-quit` locks the vault
+  automatically.
+
+### BSV-21 tokens
+
+- **Import** any BSV-21 token by its full origin ID (e.g.
+  `<txid>_1`). Imports are wallet-scoped and remain selectable in the market
+  view even when the wallet holds no balance of that token.
+- **Send** preserves the token amount in base units; any remainder is
+  returned to the wallet as a BSV-21 transfer output.
+- **Token carrier outputs are kept strictly separate from ordinary P2PKH fee
+  inputs.** A token input is never accidentally spent as cash, and cash is
+  never sent to a token script.
+- **Icons** referenced by BSV-21 `_0` metadata are extracted from the wallet's
+  locally tracked parent transaction first, falling back to the BananaBlocks
+  transaction hex only when the image transaction is not cached. The same icon
+  appears in Overview, Assets, and the Trading selector.
+
+### The time-lock locker
+
+Lock creation splits a token amount across **1–24 tranches** on a release
+schedule (daily, weekly, monthly, or yearly). Each tranche is a separate
+BSV-21 output with an `OP_CHECKLOCKTIMEVERIFY` clause, so the release time is
+enforced by the consensus rules of the chain rather than by a cooperative
+service. The final tranche absorbs the division remainder so no base units
+are lost.
+
+Claiming spends the matured CLTV output and returns the token amount to the
+same wallet. A tranche can only be claimed after its unlock timestamp has
+passed, and the on-chain inscription is re-checked against the local locker
+record before the claim is signed — a mismatch aborts.
+
+**Known limitation:** the current builders consume **one token carrier input
+per transaction**. An action larger than the largest single verified output
+is not yet combined across multiple token inputs.
+
+### Minting a token
+
+`BSV-21 Tools → Mint a token` creates a fixed-supply `deploy + mint` token in
+**one atomic transaction**:
+
+- **vout 0** — the icon, embedded as a 1-satoshi Ordinals output (PNG, JPEG,
+  or WebP, up to 512 KB, with a magic-byte signature check).
+- **vout 1** — the BSV-21 deploy output, referencing `_0` for the icon.
+- **vout 2** — a 1-satoshi output to the admin discovery address for
+  indexing.
+
+Keeping the image and the deployment atomic avoids spending unconfirmed change
+between two separate broadcasts. The supply must fit the BSV-21 amount range
+(`2^64 - 1`), decimals are 0–18, and the ticker is 1–32 printable characters.
+Fees are paid from verified wallet BSV UTXOs.
+
+### Peer trading
+
+The trading tab is a genuine peer-to-peer order book, not a hosted exchange.
+
+- **Discovery.** Orders are found by scanning the admin discovery address's
+  on-chain history. Each order is announced with a public `OP_RETURN` JSON
+  record (`p: 'lbsx'`, `op: 'sell'`) alongside a 1-satoshi anchor payment, and
+  the token amount is locked in an `OrdLock v2` output.
+- **Live verification.** Before a listing is shown, the wallet re-checks that
+  the anchor output is present, the order JSON matches, the `OrdLock` decodes
+  to the same token id, amount, seller, and price, and the locked output is
+  still **unspent**. A spent listing is dropped from the book.
+- **Listing.** The token amount is locked to the seller's address with the
+  asking price; change returns as a normal BSV-21 transfer.
+- **Purchase.** The buyer spends the listing output via the `OrdLock`
+  purchase template, receiving the token and returning the price.
+- **Cancellation.** Only the owner can cancel, and the on-chain lock is
+  checked against the wallet's own address first.
+- **Isolation.** The parser tolerates other applications' `OP_RETURN`
+  payloads on the same chain instead of failing on them.
+
+**Known limitation:** discovery is anchored to the admin address, so it finds
+fee-linked activity rather than a complete global order book. See
+[`TRADING-PLAN.md`](./TRADING-PLAN.md) for the precise boundaries of this
+design.
+
+### Peer Chat
+
+Peer Chat messages are written to the chain in a `safe` data output:
+
+```
+['LBSX', 'v2', 'peer_chat', <sender address>, <timestamp>, <base64 ciphertext>]
+```
+
+- 1,000 satoshis are paid to the admin discovery address.
+- The body is AES-256-GCM encrypted under a **publicly derivable** key — see
+  [the security model](#what-the-wallet-deliberately-does-not-protect).
+- A message is only accepted as authentic if the sender's address appears
+  among the transaction's input addresses, and if the transaction is
+  confirmed.
+- The local cache keeps the most recent 150 messages.
+
+### Activity history
+
+Activity refresh is incremental and designed for long-lived wallets:
+
+- It retrieves confirmed and unconfirmed address history and **merges rows by
+  txid**, so already-loaded transactions are never duplicated.
+- After the initial backfill completes, a refresh scans the newest history
+  pages until it reaches a page containing **no unseen transaction IDs**. It
+  does not use a five-old-transaction threshold, so a wallet that receives
+  many transactions in a burst still catches up completely.
+- Detail requests are issued only for **new** rows, rows whose confirmation
+  height changed, or rows whose previous lookup failed.
+- It follows BananaBlocks' opaque continuation cursors for up to **500 index
+  pages** and **500 transaction details** per refresh, paces requests to a
+  minimum of 250 ms, and retries rate-limited responses up to 3 times.
+- Failed and deferred lookups are preserved in the encrypted store, along with
+  the page cursor, so the next refresh resumes instead of starting over.
+- Pending local transactions are also checked against BananaBlocks' status
+  endpoint when history still reports height 0, so a mined transaction can
+  update the ledger and the local UTXO state without waiting for the history
+  index to catch up.
+
+The ledger shows 6 rows per page and clearly labels partial history as
+"loaded so far" rather than presenting a truncated view as complete.
+
+---
+
+## Installation
+
+### Windows installer
+
+```powershell
+npm ci
+npm run dist:win
+```
+
+This produces an NSIS installer in `release-windows-1.2.1/`. It adds Start menu
+and desktop shortcuts and launches the wallet when installation finishes.
+Users then open **LBSX Desktop Wallet** like any other desktop application —
+no command prompt required.
+
+> The installer is currently **unsigned**, so Windows will show its standard
+> unknown-publisher prompt.
+
+The `package.json` version is the canonical SemVer `1.2.1`; the wallet UI
+presents it as `v1.2.01`.
+
+---
+
+## Development
+
+**Requirements:** Node.js LTS and Windows.
+
+### One-click
+
+Double-click **`Run Wallet.bat`**. It installs the dependencies on first run
+and opens the desktop app.
+
+### Terminal
 
 ```powershell
 npm ci
 npm run dev
 ```
 
-`npm run build` builds the renderer into `dist/`. `npm run dist:win` builds the renderer and packages the Windows installer. Run `npm run test:explorer` to check transaction/token explorer routing and `npm run test:spv` to test local header-cache validation.
+`npm run dev` starts Vite on `127.0.0.1:5173` and launches Electron against
+it. `npm run build` builds the renderer into `dist/`.
 
-## Transaction safety notes
+### Scripts
 
-- Token actions require a synced token balance and an available spendable inscription output. If the source UTXO cannot be verified, the wallet refuses to sign.
-- Current BSV-21 send/lock transaction builders consume one token carrier input per transaction; the cache can hold multiple verified outputs, but an action larger than the largest single output is not yet combined across token inputs.
-- The send path preserves the token amount as base units and returns any remainder to the wallet as a BSV-21 transfer output.
-- Lock creation splits token base units across 1–24 tranches; the final tranche receives any division remainder. Claiming spends the CLTV output and returns its token amount to the same wallet.
-- BananaBlocks broadcasts are irreversible. Verify the recipient, amount, unlock schedule, and resulting txid. A timeout can be ambiguous, so check the saved txid before retrying a lock.
+| Script | Purpose |
+|---|---|
+| `npm run dev` | Vite dev server + Electron. |
+| `npm run build` | Build the renderer to `dist/`. |
+| `npm run dist:win` | Build and package the Windows installer. |
+| `npm start` | Run Electron against an existing build. |
 
-## SPV and BEEF boundary
+---
 
-Confirmed wallet inputs must pass two separate checks before they are cached as spendable: the parent transaction's BEEF Merkle proof is checked against a locally maintained BSV mainnet header chain (anchored at genesis and validated for proof of work, difficulty, linkage, median-time-past, and chain tip), and BananaBlocks' current UTXO/spend data plus the parent output script/value are checked. The wallet saves BEEF proof records inside its per-wallet encrypted data; public 80-byte block headers are cached locally. A first-time header sync may take several minutes and reports progress in the UI. Later syncs reuse validated headers and cached transaction proofs, checking for tip changes and invalidating proofs after detected reorganizations.
+## Testing
 
-SPV proves transaction inclusion, not that an output is still unspent. The indexer remains the current source for balances, history, and external spend-state refresh, and BananaBlocks is still needed to broadcast. Wallet-created pending outputs are locally tracked and may be chained before confirmation; once confirmed, they must also pass the BEEF/header proof check. These guarantees do not make the app a full node, and the wallet should not sign from an unknown or stale external spend status.
+Every suite runs **offline** against synthetic fixtures and a mocked
+broadcaster. None of them broadcast a mainnet transaction, and none of them
+use a real wallet phrase — the BIP39 test vector `abandon … about` is the
+published standard test vector, and test keys are derived from fixed
+`Buffer.alloc` byte patterns.
 
-Relevant references:
+| Script | Covers |
+|---|---|
+| `npm run test:wallet-data` | Encrypted wallet-scoped imports, balance snapshots, sync-time verification and caching, local-only input selection after sync, pagination beyond 100 history records, rate-limit retry and queue recovery, legacy locker migration, UTXO state changes, and 0-conf chaining. |
+| `npm run test:token-wallet` | Token send conservation, lock tranche scripts, local locker persistence, and a matured claim. |
+| `npm run test:token-mint` | Atomic Ordinals image + BSV-21 deployment, mint metadata, local token tracking, fee/change accounting, and the admin index output. |
+| `npm run test:spv` | Genesis anchoring, BEEF inclusion, and invalid proof rejection. |
+| `npm run test:trading` | Trading transaction construction. |
+| `npm run test:discovery` | Trading discovery snapshot. |
+| `npm run test:admin-index` | Admin-wallet index synchronisation. |
+| `npm run test:peer-chat` | Peer chat parsing and crypto. |
+| `npm run test:bsv-send` | BSV send construction and conservation. |
+| `npm run test:bananablocks-key` | Encrypted API-key storage, enable/disable, and header scoping. |
+| `npm run test:explorer` | Transaction/token explorer URL routing. |
+| `node scripts/e2e-smoke.mjs` | Both vault modes in isolated temporary profiles. |
+| `npm run test:packaged` | The packaged app's token-image rendering. |
 
-- [Simplified Payment Verification (SPV)](https://docs.bsvblockchain.org/important-concepts/high-level/simplified-payment-verification-spv)
-- [BEEF transaction format](https://docs.bsvblockchain.org/guides/sdks/concepts/beef)
-- [BananaBlocks](https://bananablocks.com/) provides the current indexer/node and broadcast connection.
-- [ElectrumSVP](https://github.com/TruthMachine/ElectrumSVP), [Simply Cash Wallet](https://github.com/simplycash/simplycashwallet), and [b-open-io/txex](https://github.com/b-open-io/txex) are additional implementation references.
+Run everything:
 
-After an input has been verified and cached, local transaction construction, signing, and chaining can use the encrypted wallet records without another parent-transaction or token-history lookup. Sync still contacts BananaBlocks for external balance/UTXO changes and current spend status; broadcasting always requires network access. The wallet must not treat its cache or a BEEF bundle as proof of current unspent status.
+```powershell
+npm run test:wallet-data
+npm run test:token-wallet
+npm run test:token-mint
+npm run test:spv
+npm run test:trading
+npm run test:discovery
+npm run test:admin-index
+npm run test:peer-chat
+npm run test:bsv-send
+npm run test:bananablocks-key
+npm run test:explorer
+```
 
-## Smoke test
+The smoke tests honour `LBSX_TEST_USER_DATA_DIR` to isolate their data
+directory, but only when the app is not packaged, or when
+`LBSX_TEST_PACKAGED=1` is also set. A packaged build will never redirect its
+data directory from an environment variable alone.
 
-Run `node scripts/e2e-smoke.mjs` to exercise both vault modes in isolated temporary profiles. It uses the published BIP39 test vector `abandon … about`, never uses a real wallet phrase, and removes the temporary test data when it finishes. `npm run test:packaged` additionally checks the packaged Windows app's token-image rendering in Overview, Assets, and Trading using an isolated synthetic fixture.
+---
 
-Run `npm run test:token-wallet` to exercise token send conservation, lock tranche scripts, local locker persistence, and a matured claim using synthetic UTXOs and a mocked broadcaster. Run `npm run test:wallet-data` to exercise encrypted wallet-scoped imports and balance snapshots, sync-time verification and caching of BSV/token inputs, local-only input selection after sync, pagination beyond 100 history records, rate-limit retry/queue recovery, legacy locker migration, UTXO state changes, and 0-conf BSV/token chaining. Run `npm run test:token-mint` to verify an atomic Ordinals image/BSV-21 deployment, requested mint metadata, local token tracking, fee/change accounting, and the admin index output with a mocked broadcaster. These tests use synthetic data and do not send a mainnet transaction.
+## Project layout
 
-Run `npm run test:spv` to check genesis anchoring, BEEF inclusion, and invalid proof rejection offline. Run `npm run test:bananablocks-key` to verify encrypted API-key storage, enable/disable behavior, and header scoping without contacting BananaBlocks. The mint smoke test uses a synthetic wallet and a mocked broadcaster with the requested `LBSXWALLET` / `100000` / 8-decimal parameters; it does not mint on mainnet.
+```
+LBSX Desktop Wallet/
+├── electron/                  # Main process (Node, CommonJS)
+│   ├── main.cjs               #   lifecycle, window hardening, IPC
+│   ├── preload.cjs            #   the renderer bridge
+│   ├── vault.cjs              #   key custody
+│   ├── wallet-data.cjs        #   encrypted persistence
+│   ├── spv.cjs                #   header chain + BEEF proofs
+│   ├── chain.cjs              #   sync orchestration
+│   ├── token-wallet.cjs       #   BSV / BSV-21 / lock / chat builders
+│   ├── market.cjs             #   order book, list, buy, cancel
+│   ├── trading.cjs            #   discovery
+│   ├── admin-wallet-index.cjs #   admin-wallet history scanning
+│   ├── peer-chat.cjs          #   chat parsing
+│   ├── peer-chat-crypto.cjs   #   chat obfuscation
+│   ├── transaction-tracker.cjs#   persist-before-broadcast
+│   ├── bananablocks.cjs       #   API key + authenticated fetch
+│   ├── explorer.cjs           #   validated deep links
+│   └── constants.cjs          #   the public discovery address
+├── src/                       # Renderer (React, ES modules)
+│   ├── App.jsx                #   shell + Overview, Activity, Security
+│   ├── TradingPage.jsx
+│   ├── Bsv21ToolsPage.jsx
+│   ├── PeerChatPage.jsx
+│   ├── TokenIcon.jsx
+│   ├── ExplorerReference.jsx
+│   └── *.css
+├── scripts/                   # Offline smoke tests
+├── assets/                    # Icons and branding
+├── index.html                 # Vite entry + CSP
+├── vite.config.js
+├── package.json               # Canonical version 1.2.1
+├── TRADING-PLAN.md            # Trading design and its limits
+├── SECURITY.md                # Disclosure policy and threat model
+├── CONTRIBUTING.md            # Contributor guide
+└── LICENSE                    # MIT
+```
 
-On-chain reads and broadcasts still require network access to public nodes/indexers. “Local” here means local key custody, derivation, transaction building/signing, and app state; no hosted wallet account is required.
+---
+
+## Known limitations
+
+These are real, current, and worth knowing before you rely on the wallet.
+
+1. **BananaBlocks is required.** Balances, history, token metadata, and
+   broadcast all go through `https://bananablocks.com/api/v1`. The wallet
+   degrades to its encrypted cache offline, but it cannot refresh balances or
+   broadcast without the indexer.
+2. **This is not a full node.** The header chain proves inclusion of the
+   transactions being spent, not the validity of the whole chain.
+3. **SPV proves inclusion, not unspentness.** The indexer remains the source
+   of truth for current spend state.
+4. **One token carrier input per transaction.** Token actions larger than the
+   largest single verified token output are not yet combined across inputs.
+5. **Peer Chat is reversible.** Its key is derived from a public address. See
+   [the security model](#what-the-wallet-deliberately-does-not-protect).
+6. **Trading discovery is anchor-limited.** It finds fee-linked peer activity
+   via the admin address, not a complete global order book.
+7. **The installer is unsigned.** Windows SmartScreen will warn on first run.
+8. **Windows is the only supported platform today.** The code is
+   cross-platform in principle; the packaging and the OS key-store behaviour
+   are not yet verified elsewhere.
+9. **No hardware-wallet, multi-sig, or coin-control support.**
+10. **The indexer sees your addresses.** There is no privacy layer.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please read [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+first — in particular the rule that **no wallet data, keys, or phrases may
+ever be committed**, and the requirement that the offline test suites keep
+passing.
+
+---
+
+## License
+
+MIT. See [`LICENSE`](./LICENSE).
+
+Copyright © 2026 captainsvbot.
