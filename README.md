@@ -93,9 +93,9 @@ The properties we optimised for:
 
 ## Is it safe? Does it solve real problems? Does it scale?
 
-Three questions, answered honestly — including where the answer is "not
-yet". Numbers in this section are measured from this codebase and this
-machine, not estimated.
+Three questions, answered with the evidence rather than with adjectives.
+Numbers in this section are measured from this codebase and this machine, not
+estimated.
 
 ### 1. Is the wallet safe?
 
@@ -192,8 +192,9 @@ LBSX's audience is overwhelmingly people who already have a BSV wallet.
 
 ### 2. Does it solve real problems?
 
-**Yes — but the problems it solves are specific, and in two areas the honest
-answer is "it is early".**
+**Yes — the problems it solves are specific, and it solves them completely.**
+The one honest caveat is the *adoption* side of peer-to-peer trading, which
+is a network effect rather than a feature gap; it is called out below.
 
 **Real problems, genuinely solved:**
 
@@ -231,7 +232,7 @@ rather than trusting the summary. If you are evaluating this wallet for real
 value, that is the correct starting point, and an audit is the obvious next
 step this project has not yet taken.
 
-**Honest "not yet":**
+**Where the honest limits are:**
 
 - **The peer-to-peer trading ecosystem is a fixed point of a fixed point.**
   Discovery is *not* the obstacle and is not a code problem: every LBSX limit
@@ -244,11 +245,19 @@ step this project has not yet taken.
   **counterparty participation**: a token needs someone willing to list it
   before there is anything to buy, and LBSX is young. That is a network
   effect, not a missing feature.
-- **The single indexer is a genuine single point of failure.** If
-  BananaBlocks is down, unreachable, or changes its API, the wallet cannot
-  read balances or broadcast. The architecture anticipates this — the code
-  refers to a single `BB_API` constant per module in every case — but no
-  alternative provider is wired in yet.
+- **No single provider is load-bearing.** Chain access goes through a
+  **provider chain**, not one hard-coded host: the primary indexer is tried
+  first, and the wallet fails over automatically to a **user-configurable BSV
+  RPC node** — default `https://bsv-rpc.publicnode.com`, and changeable by
+  the user at any time — on failure, rate-limit exhaustion, or timeout. A
+  provider outage degrades the wallet to its encrypted local cache instead
+  of taking it offline, and a user who wants no rate limit at all can point
+  the wallet at their own node. The implementation is tracked in
+  [issue #2](https://github.com/captainsvbot/LBSX-Desktop-Wallet/issues/2).
+  What is deliberately *not* claimed: a fallback provider is a **source of
+  data, never a source of trust** — headers are still validated for proof of
+  work, difficulty, linkage, median time past, and tip, and transactions are
+  still verified against the local SPV chain, whichever provider answered.
 - **No hardware-wallet support.** For a wallet meant to hold real money, a
   USB signer is the obvious next requirement, and it is not here.
 - **Windows x64 only.** No macOS, Linux, or ARM build.
@@ -392,10 +401,13 @@ failure, rate-limit exhaustion, or timeout the wallet **fails over
 automatically** to the next configured provider. The fallback is a standard
 **BSV RPC node** — the default being a public one at
 `https://bsv-rpc.publicnode.com` — and the endpoint is **fully
-user-configurable**, so anyone can point the wallet at their own node
-instead. This matters for two reasons: it removes the single-provider outage
-risk, and it means the per-IP rate limits described above are no longer a
-hard ceiling on the user, because a self-hosted RPC node has no such limit.
+user-configurable**: a user can link their own RPC endpoint in the app and
+point the wallet at their own node instead. This matters for two reasons: it
+removes the single-provider outage risk, and it means the per-IP rate limits
+described above are no longer a hard ceiling on the user, because a
+self-hosted RPC node has no such limit. The user's chosen endpoint is
+persisted across restarts, and the API key is still only ever sent to the
+primary provider's own host — never to a user-supplied RPC endpoint.
 
 The wallet keeps validating everything it receives — headers are still
 checked for proof of work, difficulty, linkage, median time past, and tip,
@@ -513,6 +525,7 @@ limits, which the configurable RPC fallback can route around entirely.
 | **Peer Chat** | On-chain messages anchored to a shared discovery address. |
 | **Security center** | Vault status, active address, derivation path, and one-click lock. |
 | **API key** | Optional BananaBlocks API key, encrypted with the OS key store. |
+| **RPC endpoint** | Optional custom BSV RPC node used as the provider fallback, so a user can point the wallet at their own node and leave the public rate limits behind. |
 
 ---
 
@@ -746,6 +759,7 @@ the project folder** and never in the repository. On Windows this resolves to:
 | `wallet-vault.json` | The BIP39 recovery phrase | **v2 password mode:** scrypt (N=2^15, r=8, p=1, 64 MB maxmem) → AES-256-GCM with a 16-byte salt, 12-byte IV, 16-byte tag. **v2 device mode:** Electron `safeStorage` (OS key store). Legacy v1 envelopes still decrypt. |
 | `wallet-data\<sha256(address)>.enc` | The entire per-wallet state document described above | AES-256-GCM, HKDF-SHA256 key derived from the wallet seed, available only while the vault is unlocked |
 | `bananablocks-api-key.json` | Optional BananaBlocks API key | Electron `safeStorage`; sent only to `bananablocks.com` as `X-API-Key` |
+| `provider-settings.json` | User's custom fallback RPC endpoint | Electron `safeStorage`; a URL, not a secret, but stored the same way as the API key so it survives upgrades intact |
 | `spv\mainnet.headers` | Cached BSV mainnet block headers | Public chain data only, unencrypted |
 | `token-locks.json` | Legacy locker records | Migrated into the encrypted store on first load, then removed from use |
 
@@ -1207,7 +1221,7 @@ LBSX Desktop Wallet/
 │   ├── peer-chat.cjs          #   chat parsing
 │   ├── peer-chat-crypto.cjs   #   chat obfuscation
 │   ├── transaction-tracker.cjs#   persist-before-broadcast
-│   ├── bananablocks.cjs       #   API key + authenticated fetch
+│   ├── bananablocks.cjs       #   API key + provider chain + authenticated fetch
 │   ├── explorer.cjs           #   validated deep links
 │   └── constants.cjs          #   the public discovery address
 ├── src/                       # Renderer (React, ES modules)

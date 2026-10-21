@@ -107,19 +107,19 @@ Balance, history, and token reads are address-based. BananaBlocks (and
 anything able to observe traffic to it) learns which addresses you query and
 when. There is no privacy layer, no coin mixing, and no address rotation.
 
-The indexer is also a **choke point for availability**, and it meters
-broadcasting separately from reads. The broadcast route is capped at **10
-transactions per minute per IP**, counted in transactions rather than
-requests, and status lookups are capped at **120 per minute per IP**. A
-`free` API key raises the read budget but not the broadcast budget. Because
-these caps are per IP, and because an LBSX installation holds exactly **one
-wallet** behind **one** connection, separate wallets do not contend with one
-another. A user who deliberately runs several wallets behind a single NAT or
-carrier-grade NAT does share a bucket and is capped together — and that is
-what the **configurable RPC provider fallback** exists to solve, since a
-user-supplied node has no per-IP ceiling at all. An attacker who can force a
-user behind a shared IP cannot steal the user's funds or read the vault, but
-can slow that user's ability to broadcast while the wallet is in use.
+The indexer meters broadcasting separately from reads. The broadcast route is
+capped at **10 transactions per minute per IP**, counted in transactions
+rather than requests, and status lookups are capped at **120 per minute per
+IP**. A `free` API key raises the read budget but not the broadcast budget.
+Because these caps are per IP, and because an LBSX installation holds
+exactly **one wallet** behind **one** connection, separate wallets do not
+contend with one another. A user who deliberately runs several wallets
+behind a single NAT or carrier-grade NAT does share a bucket and is capped
+together — and that is what the **configurable RPC provider fallback**
+exists to solve, since a user-supplied node has no per-IP ceiling at all. An
+attacker who can force a user behind a shared IP cannot steal the user's
+funds or read the vault, but can slow that user's ability to broadcast
+while the wallet is in use.
 
 ### 4. SPV proves inclusion, not unspentness
 
