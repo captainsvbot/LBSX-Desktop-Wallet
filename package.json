@@ -1,0 +1,99 @@
+{
+  "name": "lbsx-desktop-wallet",
+  "version": "1.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Local-first BSV and BSV-21 desktop wallet with SPV validation and on-chain trading",
+  "license": "MIT",
+  "author": "captainsvbot",
+  "homepage": "https://github.com/captainsvbot/LBSX-Desktop-Wallet#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/captainsvbot/LBSX-Desktop-Wallet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/captainsvbot/LBSX-Desktop-Wallet/issues"
+  },
+  "keywords": [
+    "bsv",
+    "bsv-21",
+    "bitcoin-sv",
+    "wallet",
+    "electron",
+    "spv",
+    "ordinals"
+  ],
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "build": "vite build",
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "test:bsv-send": "node scripts/bsv-send-smoke.mjs",
+    "test:token-wallet": "node scripts/token-transaction-smoke.mjs",
+    "test:trading": "node scripts/trading-transaction-smoke.mjs",
+    "test:admin-index": "node scripts/admin-wallet-index-smoke.mjs",
+    "test:peer-chat": "node scripts/peer-chat-smoke.mjs",
+    "test:discovery": "node scripts/trading-discovery-smoke.mjs",
+    "test:spv": "node scripts/spv-smoke.mjs",
+    "test:explorer": "node scripts/explorer-reference-smoke.cjs",
+    "test:bananablocks-key": "node scripts/bananablocks-api-key-smoke.mjs",
+    "test:wallet-data": "node scripts/wallet-data-smoke.mjs",
+    "test:token-mint": "node scripts/token-mint-smoke.mjs",
+    "test:packaged": "node scripts/packaged-smoke.mjs",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@1sat/templates": "^0.0.44",
+    "@bsv/sdk": "^2.6.0",
+    "bip39": "3.1.0",
+    "bsv": "1.5.6",
+    "bsv-headers": "3.0.5",
+    "lucide-react": "^0.468.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^39.0.0",
+    "electron-builder": "^26.15.3",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "app.lbsx.desktopwallet",
+    "productName": "LBSX Desktop Wallet",
+    "electronDist": "node_modules/electron/dist",
+    "publish": null,
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release-windows-1.2.1"
+    },
+    "asar": true,
+    "win": {
+      "icon": "assets\\lbsx-wallet.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

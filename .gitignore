@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+release/
+release-windows/
+release-windows-*/
+
+# Electron-builder scratch configs (per-release overrides; the canonical
+# build config lives in package.json -> "build")
+.builder-*.yml
+
+# Environment / credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.netrc
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local wallet state (never belongs in the repository).
+# The running app stores these under the Electron userData directory, but
+# ignore them here too in case anyone ever points the app at this folder.
+wallet-vault.json
+wallet-data/
+*.enc
+mainnet.headers
+trading-chain-cache.json
+token-locks.json
+bananablocks-api-key.json

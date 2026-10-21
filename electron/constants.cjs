@@ -1,0 +1,3 @@
+module.exports = {
+  ADMIN_DISCOVERY_ADDRESS: '15BYCBgXi2GWXEvJNJJGfcYxeN9nQqp7eB',
+};

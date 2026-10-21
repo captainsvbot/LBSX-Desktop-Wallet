@@ -1,0 +1,28 @@
+.mint-tool-card{max-width:780px;margin:0 auto;padding:24px}
+.mint-tool-heading{display:flex;align-items:center;gap:12px;padding-bottom:19px;border-bottom:1px solid var(--line)}
+.mint-tool-icon{width:40px;height:40px;display:grid;place-items:center;border:1px solid rgba(119,220,165,.15);border-radius:12px;background:rgba(119,220,165,.08);color:var(--mint)}
+.mint-tool-heading h2{margin:5px 0 0;font:600 16px var(--display)}
+.mint-form{padding-top:8px}
+.mint-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+.mint-form .field-label>input[type=file]{padding:10px;color:#9aa89f}
+.mint-form .mint-image-label{grid-column:1/-1}
+.mint-image-preview{display:flex;align-items:center;gap:12px;margin:8px 0 14px;padding:10px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.02);color:#9aa89f;font-size:10px}
+.mint-image-preview img{width:48px;height:48px;object-fit:cover;border-radius:8px;background:#0b1112}
+.mint-local-note{display:flex;align-items:flex-start;gap:9px;margin:17px 0;padding:12px;border:1px solid rgba(119,220,165,.1);border-radius:10px;background:rgba(119,220,165,.035);color:#91a399;font-size:9px;line-height:1.6}
+.mint-local-note svg{flex:none;color:#8ad9a9}
+.mint-review-button{width:100%}
+.mint-review{padding-top:20px}
+.mint-review h3,.mint-success h3{margin:7px 0 16px;font:600 17px var(--display)}
+.mint-review>div:not(.sync-error){display:flex;justify-content:space-between;gap:12px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.02);margin:7px 0}
+.mint-review>div span{font-size:9px;color:#829087}
+.mint-review>div b{font-size:10px;color:#dbe6df;text-align:right;overflow-wrap:anywhere}
+.mint-review>p,.mint-success>p{font-size:10px;line-height:1.65;color:#87958d}
+.mint-review-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.mint-success{padding:24px 0 4px;text-align:center}
+.mint-success-icon{width:44px;height:44px;display:grid;place-items:center;margin:0 auto 12px;border-radius:14px;background:rgba(119,220,165,.1);color:var(--mint)}
+.mint-success dl{display:grid;gap:8px;margin:18px 0;text-align:left}
+.mint-success dl>div{display:grid;gap:5px;padding:11px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.02)}
+.mint-success dt{font-size:8px;color:#819087;text-transform:uppercase;letter-spacing:.08em}
+.mint-success dd{margin:0;font-size:10px;color:#dce7df;overflow-wrap:anywhere}
+.mint-success code{font:9px var(--mono);color:#afd8bd}
+@media(max-width:600px){.mint-tool-card{padding:17px}.mint-form-grid{grid-template-columns:1fr}.mint-form .mint-image-label{grid-column:auto}.mint-review-actions{justify-content:stretch}.mint-review-actions button{flex:1}}
