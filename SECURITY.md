@@ -112,12 +112,14 @@ broadcasting separately from reads. The broadcast route is capped at **10
 transactions per minute per IP**, counted in transactions rather than
 requests, and status lookups are capped at **120 per minute per IP**. A
 `free` API key raises the read budget but not the broadcast budget. Because
-these caps are per IP, separate wallets on separate connections do not
-contend with one another — but wallets sharing a single NAT, a carrier-grade
-NAT, or one cloud region share a bucket and are capped together. An
-attacker who can force a user behind a shared IP cannot steal the user's
-funds or read the vault, but can slow that user's ability to broadcast
-while the wallet is in use.
+these caps are per IP, and because an LBSX installation holds exactly **one
+wallet** behind **one** connection, separate wallets do not contend with one
+another. A user who deliberately runs several wallets behind a single NAT or
+carrier-grade NAT does share a bucket and is capped together — and that is
+what the **configurable RPC provider fallback** exists to solve, since a
+user-supplied node has no per-IP ceiling at all. An attacker who can force a
+user behind a shared IP cannot steal the user's funds or read the vault, but
+can slow that user's ability to broadcast while the wallet is in use.
 
 ### 4. SPV proves inclusion, not unspentness
 
@@ -271,7 +273,20 @@ deliberate:
   each wallet reaches it from its own connection. Users do not contend for
   one another's request allowance, and one user syncing hard cannot exhaust
   another user's budget. The only shared bucket is the one an account owner
-  creates deliberately by sharing their own API key.
+  creates deliberately by sharing their own API key or by running several
+  wallets behind one NAT — and the latter is a limit the configurable RPC
+  fallback removes, since a user-supplied node has no per-IP cap.
+- **No single-provider dependency.** Chain access goes through a **provider
+  chain**, not one hard-coded host: the primary indexer is tried first, and
+  the wallet fails over automatically to a configurable BSV RPC node —
+  default `https://bsv-rpc.publicnode.com`, and fully user-configurable so
+  a user can point it at their own node — on failure, rate-limit
+  exhaustion, or timeout. A provider outage degrades the wallet to its
+  encrypted cache rather than taking it offline. Crucially, **a provider is
+  a source of data, never a source of trust**: headers are still validated
+  for proof of work, difficulty, linkage, median time past, and tip, and
+  transactions are still verified against the local SPV chain, whichever
+  provider answered.
 - **No auto-update channel.** `publish` is `null` in the build
   configuration and there is no `electron-updater` dependency, so the wallet
   cannot be silently updated — including by a compromised or coerced
@@ -279,9 +294,11 @@ deliberate:
   build, which is a conscious act. This is also why a build is not signed:
   see the README's known limitations.
 - **No phone-home of any kind.** The dependency list contains no analytics,
-  tracking, or crash-reporting SDK. The only external host the wallet
-  contacts is the public indexer, and only for data the user asked it to
-  fetch.
+  tracking, or crash-reporting SDK. The only external hosts the wallet
+  contacts are public chain providers — the primary indexer and the
+  configurable fallback RPC node — and only for data the user asked it to
+  fetch. The API key is attached only for the primary provider's own host
+  and is never sent to a user-supplied RPC endpoint.
 - **No inbound surface.** The Electron main process opens no listening
   socket, so the wallet cannot be reached by another machine on the local
   network, and there is no remote-control or RPC channel into a running

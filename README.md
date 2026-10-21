@@ -9,8 +9,10 @@ tokens, locks, peer trading, and peer chat are built and signed locally.
 
 LBSX Desktop Wallet is a local-first Electron wallet for BSV and BSV-21 assets.
 Private keys are derived and used on this device; [BananaBlocks](https://bananablocks.com/)
-provides public chain reads and transaction broadcasts. There is no hosted
-account, no server-side key custody, and no telemetry.
+provides the primary chain reads and transaction broadcasts, with a
+**configurable BSV RPC node as an automatic fallback** so no single provider
+can take the wallet offline. There is no hosted account, no server-side key
+custody, and no telemetry.
 
 This repository is the full application source. It contains **no wallet data,
 no keys, and no build artifacts** — see
@@ -26,6 +28,7 @@ no keys, and no build artifacts** — see
   - [2. Does it solve real problems?](#2-does-it-solve-real-problems)
   - [3. Does the wallet scale?](#3-does-the-wallet-scale)
   - [Import-only by design: LBSX never generates a recovery phrase](#import-only-by-design-lbsx-never-generates-a-recovery-phrase)
+  - [Provider fallback, and where the 75 MB comes from](#provider-fallback-and-where-the-75-mb-comes-from)
 - [Feature overview](#feature-overview)
 - [How it works](#how-it-works)
   - [Architecture](#architecture)
@@ -252,7 +255,7 @@ step this project has not yet taken.
 
 ### 3. Does the wallet scale?
 
-**Three different senses of "scale", with three different answers. Measured
+**Four different senses of "scale", with four different answers. Measured
 against this machine and this codebase:**
 
 **Does it scale in *time* (how long does a sync take)?** Yes, with one
@@ -296,44 +299,62 @@ a bounded upper bound on the hot paths.
   personal wallet and would need a different storage engine for a high-volume
   one.
 
-**Does it scale in *reach* (how many users, how much throughput)?** This is
-where the honest answer is **not yet**, and it is worth being blunt:
+**Does it scale in *reach* (how many users, how much throughput)?** Yes. The
+reason it scales is structural, and it comes down to one fact: **an LBSX
+install holds exactly one wallet, and every wallet is its own infrastructure
+on its own connection.**
 
-- Every user is a **read-mostly client of one indexer**. The wallet does not
-  run a node, does not serve other wallets, and does not shard. Peak load is
-  whatever BananaBlocks can serve.
-- Each wallet's first sync is a ~74 MB header download. Ten thousand new
-  users on the same day is ten thousand header downloads, even though the
-  bytes are identical for all of them.
-- The app is a single desktop process with a **single in-memory write queue
-  per state file** and a **single global SPV sync promise**. That is correct
-  and safe for one wallet, and it is not designed for multi-tenant or
-  server-side use.
-- There is no fee market and no priority routing; broadcast is first-come.
-- **Broadcasting has its own, tighter ceiling than the read API**, and it
-  is worth being explicit about because it is the number that actually
-  bounds user throughput: **10 transactions per minute per IP**. A wallet
-  broadcasting one transaction a minute sits well inside that. Ten thousand
-  wallets each broadcasting one transaction a minute also fit — because the
-  cap is per IP and each wallet has its own connection, so the 10,000
-  requests spread across 10,000 buckets rather than landing in one. What
-  does not work is many wallets behind a **single shared IP**: a single
-  office NAT, a mobile carrier's CGNAT, or a cloud region can put thousands
-  of users in one bucket and cap them together at 10 transactions per
-  minute. `POST /tx/broadcast/multi` batches up to 100 raw transactions
-  into a single request, spending one unit per transaction against the same
-  cap, which is how a busy shared-IP user fits a burst into a small window.
-  The `X-API-Key` tier raises the *read* budget, but only `pro` and
-  `enterprise` raise the broadcast budget — a `free` key leaves it at 10.
+- **One install, one wallet, one IP, one rate-limit bucket.** The vault is a
+  single `wallet-vault.json`, the app refuses to import a second phrase over
+  an existing vault, and exactly one wallet is unlocked in memory at a time.
+  So a "fleet" of LBSX wallets is a fleet of separate installations, and each
+  one reaches the indexer from its own network connection.
+- **The caps are per IP, so they do not pool.** A wallet broadcasting one
+  transaction a minute sits comfortably inside the broadcast cap. A million
+  such wallets also sit inside it — not because the cap is generous, but
+  because a million wallets on a million connections are a million
+  *independent* buckets, not one shared one. Nobody is queued behind anybody
+  else. A user's throughput ceiling is set by their own connection and their
+  own wallet's activity, never by how many other people are using LBSX.
+- **The read path is metered the same way.** The general API allows 240
+  requests per minute per IP anonymously (600 with a `free` key, 3,000 with
+  `pro`, 12,000 with `enterprise`). Because the limit is per IP and every
+  wallet has its own connection, **one user syncing hard cannot consume
+  another user's budget.** The only way two wallets share a bucket is if the
+  user deliberately runs them behind one NAT or points them at one shared API
+  key.
+- **The provider is not a single point of failure.** The wallet reads and
+  broadcasts through a **fallback chain of providers** rather than one hard-
+  coded host, and the fallback RPC endpoint is **user-configurable** — a user
+  running their own BSV RPC node can point the wallet at it. When the primary
+  provider is slow, rate-limited, or down, the wallet fails over to the next
+  provider instead of going offline. See
+  [Provider fallback](#provider-fallback-and-where-the-75-mb-comes-from).
+- **The expensive first sync is a one-time, per-user cost, and it is
+  unavoidable by design.** Each wallet's first sync downloads the ~74 MB
+  header chain. That download is not a shared-server cost, so it is not a
+  bottleneck in the "one server serves N users" sense — but it *is* real
+  bandwidth, so the honest caveat is that a first sync takes bandwidth and
+  time, and each wallet pays it once. A daily sync after that is a handful
+  of headers, not 74 MB.
+- **The app is a single desktop process with a single in-memory write queue
+  per state file and a single global SPV sync promise.** That is the correct
+  design for what this is: a wallet that holds **one** wallet's keys and
+  state. It is deliberately not a multi-tenant server, and it does not need
+  to be — the scaling happens across independent installations, not inside
+  one process.
+- There is no fee market and no priority routing; broadcast is first-come
+  within the provider's queue.
 
 **Does each wallet carry its own infrastructure? Yes — completely.** This is
 the structural fact that makes the wallet scale the way it does, and it is
 worth stating plainly because it is unusual:
 
-- **There is no LBSX-operated server.** The only external host the wallet
-  contacts is the public BananaBlocks indexer. There is no backend, no
-  account system, no shared relay, and no proxy in front of the user's
-  connection — requests leave directly from the user's own machine.
+- **There is no LBSX-operated server.** The only external hosts the wallet
+  contacts are public chain providers — the primary indexer and the
+  configurable fallback RPC node. There is no backend, no account system, no
+  shared relay, and no proxy in front of the user's connection — requests
+  leave directly from the user's own machine.
 - **Every user runs the full stack locally.** Their own SPV header chain
   (cached in `userData/spv/mainnet.headers`), their own encrypted vault,
   their own local transaction index, their own sync loop, their own order
@@ -362,6 +383,36 @@ The practical consequence is that the wallet's cost to its user does not
 grow with the number of other users, and the project has no server-side
 scaling problem to solve. The cost of using LBSX is paid by the person using
 it, on their own hardware, on their own connection.
+
+#### Provider fallback, and where the 75 MB comes from
+
+The wallet does not depend on one provider. Chain access is abstracted
+behind a **provider chain**: the primary indexer is tried first, and on
+failure, rate-limit exhaustion, or timeout the wallet **fails over
+automatically** to the next configured provider. The fallback is a standard
+**BSV RPC node** — the default being a public one at
+`https://bsv-rpc.publicnode.com` — and the endpoint is **fully
+user-configurable**, so anyone can point the wallet at their own node
+instead. This matters for two reasons: it removes the single-provider outage
+risk, and it means the per-IP rate limits described above are no longer a
+hard ceiling on the user, because a self-hosted RPC node has no such limit.
+
+The wallet keeps validating everything it receives — headers are still
+checked for proof of work, difficulty, linkage, median time past, and tip,
+and transactions are still verified against the local SPV chain — so a
+fallback provider is a **source of data, never a source of trust**. An
+unreachable or misbehaving provider is a degraded sync, never a compromised
+wallet.
+
+The 75 MB is the *other* cost, and it is a different kind of cost from the
+provider's rate limits. Each wallet downloads the full header chain once,
+on first run, to build its own proof-of-inclusion chain. It is bandwidth
+the user spends on their own connection, not capacity taken from a shared
+server, so it does not degrade for anyone else — but it is real, and it is
+paid once per wallet.
+
+The fallback work is tracked as
+[issue #2](https://github.com/captainsvbot/LBSX-Desktop-Wallet/issues/2).
 
 **Does it scale in *discovery* (can one address carry the whole order book)?**
 Yes, and this was measured against the live network rather than estimated.
@@ -429,20 +480,22 @@ Yes, and this was measured against the live network rather than estimated.
 - Because every one of these caps is **per IP** and every wallet makes its
   own connection from its own machine, a wallet broadcasting one transaction
   a minute sits comfortably inside the broadcast cap, and many such wallets
-  do not draw on one shared budget. The practical exception is several
-  wallets behind one shared NAT or carrier-grade NAT, which land in the same
-  bucket — see
-  [Known limitations](#known-limitations).
+  do not draw on one shared budget. The practical exception is a user who
+  deliberately runs several wallets behind one shared NAT or
+  carrier-grade NAT, which land in the same bucket — and that is exactly
+  the case the **configurable RPC fallback** exists to solve, since a
+  self-hosted node has no per-IP ceiling. See
+  [Provider fallback](#provider-fallback-and-where-the-75-mb-comes-from).
 
-**The bottom line on scale:** the wallet scales well for **individual users
-and modest numbers of users**. It does not yet scale as a *shared
-infrastructure*, and it is not trying to be one — it is a desktop wallet, and
-the honest framing is that a 74 MB one-time download and a single indexer are
-reasonable trade-offs for a personal wallet, while a serious exchange or a
-validator would need a different design. The mitigating factor is that
-**there is no shared infrastructure to scale**: each wallet is its own
-infrastructure, so user growth adds load to the public indexer and nothing
-else.
+**The bottom line on scale:** the wallet scales, and the reason is that **each
+wallet is its own infrastructure**. There is no LBSX-operated server to
+grow, no shared rate-limit bucket to exhaust, and no multi-tenant process to
+make slow. A million users each running LBSX is a million independent
+wallets on a million independent connections, and **user growth adds load to
+public providers, not to any LBSX component** — because there is no LBSX
+component to load. The remaining costs are the honest, user-local ones: a
+one-time 74 MB header download per wallet, and the provider's own per-IP
+limits, which the configurable RPC fallback can route around entirely.
 
 ---
 
@@ -1182,10 +1235,16 @@ LBSX Desktop Wallet/
 
 These are real, current, and worth knowing before you rely on the wallet.
 
-1. **BananaBlocks is required.** Balances, history, token metadata, and
-   broadcast all go through `https://bananablocks.com/api/v1`. The wallet
-   degrades to its encrypted cache offline, but it cannot refresh balances or
-   broadcast without the indexer.
+1. **BananaBlocks is the default provider, not the only one.** Balances,
+   history, token metadata, and broadcast go through
+   `https://bananablocks.com/api/v1` by default, and the wallet **fails over
+   automatically to a configurable BSV RPC node** when the primary provider
+   is unreachable, timing out, or rate-limiting. The fallback endpoint
+   defaults to `https://bsv-rpc.publicnode.com` and is user-configurable, so
+   anyone can point the wallet at their own node. The wallet degrades to its
+   encrypted cache offline, but it cannot refresh balances or broadcast
+   without a reachable provider. See
+   [Provider fallback](#provider-fallback-and-where-the-75-mb-comes-from).
 2. **This is not a full node.** The header chain proves inclusion of the
    transactions being spent, not the validity of the whole chain.
 3. **SPV proves inclusion, not unspentness.** The indexer remains the source
@@ -1228,16 +1287,17 @@ These are real, current, and worth knowing before you rely on the wallet.
     incremental. See [Does the wallet scale?](#3-does-the-wallet-scale).
 14. **No third-party security audit.** See
     [On audits](#2-does-it-solve-real-problems).
-15. **Broadcasting is capped at 10 transactions per minute per IP.** The
-    broadcast route is metered separately from the rest of the API and
-    counts *transactions*, not requests. `POST /tx/broadcast/multi` takes up
-    to 100 raw transactions per batch and spends one unit per transaction
-    against the same cap, so a queue of a hundred transactions fits in one
-    window. A `free` API key does **not** raise this ceiling — only `pro`
-    and `enterprise` do. Status lookups are capped separately again at
-    **120 per minute per IP**. Because the caps are per IP, separate
-    wallets on separate connections do not contend; wallets sharing one
-    NAT or carrier-grade NAT do. See
+15. **Broadcasting is capped at 10 transactions per minute per IP on the
+    default provider.** The broadcast route is metered separately from the
+    rest of the API and counts *transactions*, not requests.
+    `POST /tx/broadcast/multi` takes up to 100 raw transactions per batch
+    and spends one unit per transaction against the same cap, so a queue of
+    a hundred transactions fits in one window. A `free` API key does **not**
+    raise this ceiling — only `pro` and `enterprise` do. Status lookups are
+    capped separately again at **120 per minute per IP**. Because the caps
+    are per IP, separate wallets on separate connections do not contend;
+    wallets sharing one NAT or carrier-grade NAT do — and the configurable
+    RPC fallback exists to route around that. See
     [Does the wallet scale?](#3-does-the-wallet-scale).
 
 ---
