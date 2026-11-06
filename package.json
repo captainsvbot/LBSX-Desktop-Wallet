@@ -72,7 +72,7 @@
       "package.json"
     ],
     "directories": {
-      "output": "release-windows-2.0.1"
+      "output": "release-windows-2.0.01"
     },
     "asar": true,
     "win": {
@@ -87,7 +87,7 @@
       ]
     },
     "nsis": {
-      "artifactName": "${productName} Setup ${version}.${ext}",
+      "artifactName": "${productName} Setup 2.0.01.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
