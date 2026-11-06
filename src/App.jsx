@@ -350,7 +350,6 @@ export default function App() {
     setWallet(null);
     setVaultExists(false);
     setRequiresPassword(false);
-    setDeviceProtectionAvailable(false);
     setChainSnapshot(null);
     setActivitySnapshot(null);
     setTradingSnapshot(null);
@@ -358,6 +357,10 @@ export default function App() {
     setDeletePrompt(false);
     setPage('overview');
     clearEntry();
+    // OS key-store availability is a property of the machine, not of the wallet, so re-read it
+    // instead of assuming it disappeared along with the vault.
+    const status = await window.lbsx.vaultStatus().catch(() => null);
+    setDeviceProtectionAvailable(Boolean(status?.deviceProtectionAvailable));
   };
 
   const copyAddress = async () => {
