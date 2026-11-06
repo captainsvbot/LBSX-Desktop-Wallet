@@ -24,3 +24,33 @@
 .trading-heading-actions{display:flex;gap:8px;align-items:center}.trading-heading-actions .secondary-button{display:inline-flex;align-items:center;gap:7px}.market-add-form{display:grid;grid-template-columns:minmax(220px,1.1fr) minmax(260px,1.3fr) auto;align-items:end;gap:12px;margin:0 0 14px;padding:14px 16px;border:1px solid var(--line);border-radius:11px;background:rgba(255,255,255,.018)}.market-add-form>div{min-width:0}.market-add-form .market-form-note{margin:6px 0 0}.market-add-form>input{width:100%;min-width:0;padding:10px 11px;border:1px solid var(--line);border-radius:7px;background:#101816;color:#e5eee8;font:10px var(--mono)}.market-add-form>input:focus{outline:1px solid rgba(119,220,165,.35);border-color:rgba(119,220,165,.35)}.market-add-form>.market-inline-error{grid-column:1/-1;margin:0}.market-empty>.secondary-button{display:inline-flex;align-items:center;gap:7px;margin-left:8px}.market-empty>.primary-button{display:inline-flex;align-items:center;gap:7px}@media(max-width:760px){.trading-heading-actions{width:100%;flex-wrap:wrap}.trading-page-heading{align-items:flex-start;flex-direction:column}.market-add-form{grid-template-columns:1fr}.market-add-form>.market-inline-error{grid-column:auto}.market-empty>.secondary-button{margin:8px 0 0}}
  .activity-ledger{margin-top:8px}.activity-last-sync{font-size:9px;color:#7b8982}.activity-rows{display:grid;margin-top:17px}.activity-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:13px;padding:15px 2px;border-top:1px solid var(--line)}.activity-row-icon{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;color:#e7bb76;background:rgba(231,180,73,.08);border:1px solid rgba(231,180,73,.12)}.activity-row-icon.received{color:#87dca7;background:rgba(119,220,165,.07);border-color:rgba(119,220,165,.12)}.activity-row-main{min-width:0;display:grid;gap:5px}.activity-row-main>b{font-size:11px;font-weight:600;color:#dce6df}.activity-row-main>span,.activity-row-value>span{font-size:9px;color:#7c8b82}.activity-row-main code{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:9px var(--mono);color:#738178}.activity-row-value{text-align:right;display:grid;gap:5px}.activity-row-value>b{font-size:11px;color:#c9d8cf;font-weight:600}.activity-backfill-note{margin:0 0 12px;padding:10px 12px;border:1px solid rgba(231,180,73,.14);border-radius:10px;background:rgba(231,180,73,.04);color:#c7ac75;font-size:10px;line-height:1.5}.activity-empty{width:100%;margin-top:18px}.activity-empty .primary-button{margin-top:18px}.overview-activity-list{display:grid;gap:12px;margin-top:18px}.overview-activity-row{display:flex;align-items:center;gap:10px;min-width:0}.overview-activity-row>div:last-child{min-width:0}.overview-activity-row b,.overview-activity-row span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.overview-activity-row b{font-size:10px;color:#cdd8d0;font-weight:600}.overview-activity-row span{font-size:9px;color:#78877f;margin-top:3px}
 .overview-heading{align-items:flex-start;flex-wrap:wrap}.overview-heading>div:first-child{flex:1 1 520px;max-width:640px;min-width:0}.overview-sync-copy{max-width:640px;overflow-wrap:anywhere;line-height:1.5}@media(max-width:760px){.overview-heading>div:first-child{flex:0 1 auto;width:100%}}
+
+/* Danger zone: delete wallet */
+.danger-zone{margin-top:15px;padding:16px 18px;border:1px solid rgba(237,120,109,.18);border-radius:14px;background:linear-gradient(145deg,rgba(237,120,109,.05),rgba(237,120,109,.015))}
+.danger-zone-head{display:flex;align-items:flex-start;gap:12px}
+.danger-zone-icon{flex:0 0 auto;width:34px;height:34px;display:grid;place-items:center;border-radius:10px;border:1px solid rgba(237,120,109,.22);background:rgba(237,120,109,.09);color:#ffb0a8}
+.danger-zone-head h2{margin:0;font:650 14px var(--display);color:#ffb0a8}
+.danger-zone-head p{margin:4px 0 0;font-size:10px;line-height:1.55;color:#9aa8a1}
+.danger-zone-body{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid rgba(237,120,109,.14)}
+.danger-zone-note{flex:1 1 320px;min-width:0;margin:0;font-size:10px;line-height:1.6;color:#9aa8a1}
+.danger-zone-note code{overflow-wrap:anywhere}
+.danger-button{height:38px;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;background:linear-gradient(135deg,#e2604f,#c33f30);border:1px solid rgba(255,140,120,.35);box-shadow:0 6px 18px rgba(180,50,35,.28);transition:.18s}
+.danger-button:hover:not(:disabled){filter:brightness(1.08)}
+.danger-button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+@media(max-width:760px){.danger-zone-body{flex-direction:column;align-items:stretch}.danger-zone-body .danger-button{width:100%}}
+
+/* Delete wallet confirmation modal */
+.delete-wallet-modal{max-width:660px}
+.delete-wallet-warning{display:flex;align-items:flex-start;gap:10px;padding:12px 13px;border:1px solid rgba(237,120,109,.26);border-radius:10px;background:rgba(237,120,109,.09);color:#ffb0a8}
+.delete-wallet-warning svg{flex:0 0 auto;margin-top:1px}
+.delete-wallet-warning b{display:block;font-size:11px;line-height:1.5}
+.delete-wallet-warning span{display:block;margin-top:3px;font-size:10px;line-height:1.5;color:#d9b3ae}
+.delete-wallet-risks{margin:14px 0 0;padding:0 0 0 16px;display:flex;flex-direction:column;gap:9px}
+.delete-wallet-risks li{font-size:10px;line-height:1.6;color:#9aa8a1}
+.delete-wallet-risks b{color:#d7e2dc}
+.delete-wallet-risks code{overflow-wrap:anywhere}
+.delete-wallet-confirm-copy{margin:15px 0 7px;font-size:10px;line-height:1.6;color:#9aa8a1}
+.delete-wallet-confirm-copy b{color:#ffb0a8;letter-spacing:.06em}
+.delete-wallet-input{width:100%;height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(237,120,109,.24);background:rgba(255,255,255,.04);color:#f2f7f4;font:600 12px var(--display);letter-spacing:.08em}
+.delete-wallet-input::placeholder{color:#5f6d66;letter-spacing:.08em}
+.delete-wallet-input:focus{outline:none;border-color:rgba(237,120,109,.5)}

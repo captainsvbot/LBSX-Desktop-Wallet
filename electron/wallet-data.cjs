@@ -175,6 +175,14 @@ async function getWalletData(address) {
   return readData(address);
 }
 
+async function deleteWalletData(address) {
+  const file = dataPath(address);
+  const queue = writeQueues.get(file);
+  if (queue) await queue.catch(() => {});
+  await fs.rm(file, { force: true });
+  return { deleted: true };
+}
+
 async function updateWalletData(address, updater) {
   const file = dataPath(address);
   const previous = writeQueues.get(file) || Promise.resolve();
@@ -1107,6 +1115,7 @@ async function getSpendableUtxoBlocklist(address) {
 
 module.exports = {
   getWalletData,
+  deleteWalletData,
   saveImportedToken,
   getWalletTokenLocks,
   saveWalletTokenLocks,

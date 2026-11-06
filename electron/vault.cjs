@@ -187,6 +187,13 @@ function lockVault() {
   unlockedMnemonic = null;
 }
 
+async function deleteVault() {
+  if (!hasVault()) throw new Error('There is no local wallet to delete.');
+  await fs.promises.rm(vaultPath(), { force: true });
+  unlockedMnemonic = null;
+  return { deleted: true };
+}
+
 function getWalletSummary() {
   if (!unlockedMnemonic) throw new Error('Wallet is locked.');
   return derivePublicWallet(unlockedMnemonic);
@@ -220,6 +227,7 @@ module.exports = {
   importVault,
   unlockVault,
   lockVault,
+  deleteVault,
   getWalletSummary,
   getWalletPrivateKey,
   getWalletDataEncryptionKey,

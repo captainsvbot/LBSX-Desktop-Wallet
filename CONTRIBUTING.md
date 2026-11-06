@@ -73,7 +73,7 @@ dependencies on first run and opens the app.
 npm run dist:win
 ```
 
-Output lands in `release-windows-1.2.1/`. The output directory and the NSIS
+Output lands in `release-windows-2.0.1/`. The output directory and the NSIS
 artifact name both derive from `package.json`'s `version`, so they cannot drift
 apart. If you bump the version, both follow automatically.
 
@@ -218,7 +218,7 @@ These are load-bearing. Do not weaken them:
 ### Versioning
 
 `package.json`'s `version` is the canonical SemVer. The UI shows a separate
-display form (`v1.2.01`). If you change the version, update the display
+display form (`v2.0.01`). If you change the version, update the display
 string in `src/App.jsx` to match, and update `SECURITY.md`'s supported-versions
 table.
 
@@ -241,7 +241,7 @@ this to users.
 
 Open an issue with:
 
-- The wallet version (`v1.2.01` / package version `1.2.1`) and platform.
+- The wallet version (`v2.0.01` / package version `2.0.1`) and platform.
 - What you did, what you expected, and what happened.
 - Steps to reproduce, ideally as a test script.
 - **A synthetic wallet only.** Do not include a real recovery phrase, a

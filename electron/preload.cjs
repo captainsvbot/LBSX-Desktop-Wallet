@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('lbsx', Object.freeze({
   importSeedPhrase: (payload) => ipcRenderer.invoke('vault:import', payload),
   unlock: (payload) => ipcRenderer.invoke('vault:unlock', payload),
   lock: () => ipcRenderer.invoke('vault:lock'),
+  deleteWallet: () => ipcRenderer.invoke('vault:delete'),
   walletSummary: () => ipcRenderer.invoke('wallet:summary'),
   syncBalances: () => ipcRenderer.invoke('wallet:sync-balances'),
   onSpvProgress: (callback) => {

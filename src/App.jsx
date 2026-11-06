@@ -10,10 +10,10 @@ import lbsxWalletLogo from '../assets/lbsx-wallet-logo.jpeg';
 import './branding.css';
 import './activity.css';
 import {
-  Activity, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck,
+  Activity, AlertTriangle, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck,
   Blocks, Check, ChevronDown, CircleHelp, Coins, Copy, Eye, EyeOff, FileClock,
   Fingerprint, KeyRound, LayoutDashboard, LockKeyhole, LogOut, Menu, MessageCircle,
-  Plus, RefreshCw, Send, Settings2, ShieldCheck, Sparkles, Wallet, Unlock,
+  Plus, RefreshCw, Send, Settings2, ShieldCheck, Sparkles, Trash2, Wallet, Unlock,
   TrendingUp,
 } from 'lucide-react';
 
@@ -88,6 +88,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [deletePrompt, setDeletePrompt] = useState(false);
   const [chainSnapshot, setChainSnapshot] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const balanceSyncingRef = useRef(false);
@@ -344,6 +345,21 @@ export default function App() {
     clearEntry();
   };
 
+  const deleteWallet = async () => {
+    await window.lbsx.deleteWallet();
+    setWallet(null);
+    setVaultExists(false);
+    setRequiresPassword(false);
+    setDeviceProtectionAvailable(false);
+    setChainSnapshot(null);
+    setActivitySnapshot(null);
+    setTradingSnapshot(null);
+    setPeerChatSnapshot(null);
+    setDeletePrompt(false);
+    setPage('overview');
+    clearEntry();
+  };
+
   const copyAddress = async () => {
     if (!wallet?.address) return;
     await navigator.clipboard.writeText(wallet.address);
@@ -382,7 +398,7 @@ export default function App() {
         <div className="sidebar-bottom">
           <div className="security-shortcut"><div className="shield-icon"><ShieldCheck size={17} /></div><div><b>Keys stay on this device</b><span>Encrypted local vault</span></div></div>
           <button className={`nav-item ${page === 'security' ? 'active' : ''}`} onClick={() => { setPage('security'); setMobileNav(false); }}><Settings2 size={17} /><span>Security</span></button>
-          <div className="sidebar-foot"><span className="status-dot" /> Local-only mode <span className="version">v1.2.01</span></div>
+          <div className="sidebar-foot"><span className="status-dot" /> Local-only mode <span className="version">v2.0.01</span></div>
         </div>
       </aside>
 
@@ -410,11 +426,12 @@ export default function App() {
           {page === 'send' && <ActionPage wallet={wallet} balance={chainSnapshot?.balance} syncing={syncing} onSync={syncBalances} onSent={refreshAfterWalletAction} />}
           {page === 'receive' && <Receive wallet={wallet} onCopy={copyAddress} copied={copied} />}
           {page === 'activity' && <ActivityPage snapshot={activitySnapshot} chainSnapshot={chainSnapshot} tokens={chainSnapshot?.tokens || []} syncing={activitySyncing} balanceSyncing={syncing} checkingPending={pendingStatusChecking} error={activityError} balanceError={syncError} onSync={syncActivity} onSyncBalances={syncBalances} onCheckPending={checkPendingStatuses} />}
-          {page === 'security' && <Security wallet={wallet} onCopy={copyAddress} copied={copied} onLock={lockWallet} />}
+          {page === 'security' && <Security wallet={wallet} onCopy={copyAddress} copied={copied} onLock={lockWallet} onDelete={() => setDeletePrompt(true)} />}
           {page === 'api-key' && <BananaBlocksApiPage />}
         </div>
       </main>
       {assetAction && <TokenActionModal key={`${assetAction.type}:${assetAction.token.tokenId}`} action={assetAction} wallet={wallet} onClose={() => setAssetAction(null)} onChanged={refreshAfterWalletAction} onRepair={syncBalances} />}
+      {deletePrompt && <DeleteWalletModal wallet={wallet} onClose={() => setDeletePrompt(false)} onConfirm={deleteWallet} />}
     </div>
   );
 }
@@ -887,9 +904,49 @@ function BananaBlocksApiPage() {
   </>;
 }
 
-function Security({ wallet, onCopy, copied, onLock }) {
+function Security({ wallet, onCopy, copied, onLock, onDelete }) {
   const protectionLabel = wallet.vaultMode === 'device' ? 'OS account encrypted' : 'Password encrypted';
-  return <><div className="page-heading"><div><div className="eyebrow">LOCAL KEY CUSTODY</div><h1>Security center</h1><p>Manage the encrypted vault and verify which wallet is active.</p></div><button className="danger-quiet" onClick={onLock}><LockKeyhole size={15} /> Lock now</button></div><div className="security-grid"><div className="surface-card security-main"><div className="security-head"><div className="security-big-icon"><ShieldCheck size={22} /></div><div><h2>Encrypted local vault</h2><p>Your imported phrase is encrypted on disk and only decrypted in memory while unlocked.</p></div><span className="secure-pill"><span className="status-dot" /> {protectionLabel.toUpperCase()}</span></div><div className="security-row"><div><span className="muted-label">ACTIVE ADDRESS</span><code>{shortAddress(wallet.address)}</code></div><button className="copy-button" onClick={onCopy}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? 'Copied' : 'Copy'}</button></div><div className="security-row"><div><span className="muted-label">DERIVATION PATH</span><code>{wallet.derivationPath}</code></div></div><div className="security-footer"><span><Check size={15} /> {wallet.vaultMode === 'device' ? 'OS key-store encryption' : 'AES-256-GCM encrypted'}</span><span><Check size={15} /> Phrase stays on this device</span><span><Check size={15} /> Import-only wallet</span></div></div><div className="surface-card security-side"><div className="side-icon"><KeyRound size={18} /></div><h3>Recovery phrase</h3><p>The phrase is not displayed or copied from this screen. Keep your original backup in a secure, offline location.</p><div className="security-divider" /><div className="small-proof"><ShieldCheck size={15} /> No key-generation action exists in this wallet.</div><div className="small-proof"><LockKeyhole size={15} /> Locking clears the app's unlocked phrase reference.</div></div></div><LocalNotice /></>;
+  return <><div className="page-heading"><div><div className="eyebrow">LOCAL KEY CUSTODY</div><h1>Security center</h1><p>Manage the encrypted vault and verify which wallet is active.</p></div><button className="danger-quiet" onClick={onLock}><LockKeyhole size={15} /> Lock now</button></div><div className="security-grid"><div className="surface-card security-main"><div className="security-head"><div className="security-big-icon"><ShieldCheck size={22} /></div><div><h2>Encrypted local vault</h2><p>Your imported phrase is encrypted on disk and only decrypted in memory while unlocked.</p></div><span className="secure-pill"><span className="status-dot" /> {protectionLabel.toUpperCase()}</span></div><div className="security-row"><div><span className="muted-label">ACTIVE ADDRESS</span><code>{shortAddress(wallet.address)}</code></div><button className="copy-button" onClick={onCopy}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? 'Copied' : 'Copy'}</button></div><div className="security-row"><div><span className="muted-label">DERIVATION PATH</span><code>{wallet.derivationPath}</code></div></div><div className="security-footer"><span><Check size={15} /> {wallet.vaultMode === 'device' ? 'OS key-store encryption' : 'AES-256-GCM encrypted'}</span><span><Check size={15} /> Phrase stays on this device</span><span><Check size={15} /> Import-only wallet</span></div></div><div className="surface-card security-side"><div className="side-icon"><KeyRound size={18} /></div><h3>Recovery phrase</h3><p>The phrase is not displayed or copied from this screen. Keep your original backup in a secure, offline location.</p><div className="security-divider" /><div className="small-proof"><ShieldCheck size={15} /> No key-generation action exists in this wallet.</div><div className="small-proof"><LockKeyhole size={15} /> Locking clears the app's unlocked phrase reference.</div></div></div><LocalNotice /><div className="danger-zone"><div className="danger-zone-head"><div className="danger-zone-icon"><AlertTriangle size={18} /></div><div><h2>Delete wallet</h2><p>Remove the wallet connected to this computer, including its encrypted vault and local wallet data.</p></div></div><div className="danger-zone-body"><p className="danger-zone-note">Deleting the wallet does not move any BSV or BSV-21 tokens. Funds stay on the BSV mainnet at <code>{shortAddress(wallet.address)}</code>, but this app will no longer hold the keys that can spend them.</p><button className="danger-button" onClick={onDelete}><Trash2 size={15} /> Delete Wallet</button></div></div></>;
+}
+
+function DeleteWalletModal({ wallet, onClose, onConfirm }) {
+  const [confirmText, setConfirmText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const canDelete = confirmText.trim().toUpperCase() === 'DELETE';
+  const confirm = async () => {
+    if (!canDelete || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onConfirm();
+    } catch (reason) {
+      setError(reason.message || 'Could not delete this wallet.');
+      setBusy(false);
+    }
+  };
+  return <div className="modal-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+    <section className="token-modal delete-wallet-modal" role="dialog" aria-modal="true" aria-labelledby="delete-wallet-title">
+      <header className="token-modal-head"><div><span className="eyebrow">IRREVERSIBLE ACTION</span><h2 id="delete-wallet-title">Delete Wallet</h2></div><button className="icon-button" onClick={onClose} disabled={busy} aria-label="Close">×</button></header>
+      <div className="delete-wallet-warning">
+        <AlertTriangle size={16} />
+        <div><b>This permanently destroys the wallet on this computer.</b><span>It cannot be undone, and nobody can recover it for you.</span></div>
+      </div>
+      <ul className="delete-wallet-risks">
+        <li><b>Your recovery phrase is deleted.</b> The encrypted vault that holds it is erased from disk. Without a separate offline backup of your phrase, the wallet is gone for good.</li>
+        <li><b>Your local wallet data is deleted.</b> Activity history, imported tokens, token locks, peer chat messages, and cached balance records for this address are removed from this computer.</li>
+        <li><b>Your funds are not moved.</b> Any BSV and BSV-21 tokens stay on the BSV mainnet at <code>{shortAddress(wallet.address)}</code>. Deleting the wallet removes your only key to spend them, so those funds become effectively unrecoverable.</li>
+        <li><b>You will need your phrase to return.</b> A new wallet can only be created by importing a recovery phrase again. This app cannot generate, export, or recover one.</li>
+      </ul>
+      <p className="delete-wallet-confirm-copy">Type <b>DELETE</b> to confirm you understand the risks and want to erase this wallet from this computer.</p>
+      <input className="delete-wallet-input" value={confirmText} onChange={event => setConfirmText(event.target.value)} placeholder="DELETE" autoComplete="off" spellCheck="false" disabled={busy} />
+      {error && <div className="sync-error" role="alert">{error}</div>}
+      <div className="review-buttons">
+        <button className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
+        <button className="danger-button" onClick={confirm} disabled={!canDelete || busy}>{busy ? <><RefreshCw size={15} className="spin" /> Deleting…</> : <><Trash2 size={15} /> Delete</>}</button>
+      </div>
+    </section>
+  </div>;
 }
 
 function LocalNotice() {

@@ -4,7 +4,7 @@
 computer, balances are verified against your own SPV header chain, and BSV-21
 tokens, locks, peer trading, and peer chat are built and signed locally.
 
-> **Version 1.2.1** (shown in the app as `v1.2.01`) · MIT licensed · Windows x64
+> **Version 2.0.1** (shown in the app as `v2.0.01`) · MIT licensed · Windows x64
 > · Electron 39 + React 18 + Vite 6
 
 LBSX Desktop Wallet is a local-first Electron wallet for BSV and BSV-21 assets.
@@ -1144,7 +1144,7 @@ npm ci
 npm run dist:win
 ```
 
-This produces an NSIS installer in `release-windows-1.2.1/`. It adds Start menu
+This produces an NSIS installer in `release-windows-2.0.1/`. It adds Start menu
 and desktop shortcuts and launches the wallet when installation finishes.
 Users then open **LBSX Desktop Wallet** like any other desktop application —
 no command prompt required.
@@ -1152,8 +1152,8 @@ no command prompt required.
 > The installer is currently **unsigned**, so Windows will show its standard
 > unknown-publisher prompt.
 
-The `package.json` version is the canonical SemVer `1.2.1`; the wallet UI
-presents it as `v1.2.01`.
+The `package.json` version is the canonical SemVer `2.0.1`; the wallet UI
+presents it as `v2.0.01`.
 
 ---
 
@@ -1267,7 +1267,7 @@ LBSX Desktop Wallet/
 ├── assets/                    # Icons and branding
 ├── index.html                 # Vite entry + CSP
 ├── vite.config.js
-├── package.json               # Canonical version 1.2.1
+├── package.json               # Canonical version 2.0.1
 ├── TRADING-PLAN.md            # Trading design and its limits
 ├── SECURITY.md                # Disclosure policy and threat model
 ├── CONTRIBUTING.md            # Contributor guide

@@ -9,6 +9,7 @@ const { syncTradingDiscovery, getTradingDiscoveryCache } = require('./trading.cj
 const { getTokenOrderBook, getTokenMarketInfo, getTokenSellQuote, buildAndBroadcastList, buildAndBroadcastBuy, buildAndBroadcastCancel } = require('./market.cjs');
 const { getBananaBlocksApiKeyStatus, saveBananaBlocksApiKey, removeBananaBlocksApiKey } = require('./bananablocks.cjs');
 const { getWalletActivitySnapshot, saveImportedToken } = require('./wallet-data.cjs');
+const { deleteConnectedWallet } = require('./wallet-deletion.cjs');
 const { onProgress: onSpvProgress } = require('./spv.cjs');
 const { buildBananaBlocksUrl } = require('./explorer.cjs');
 
@@ -70,6 +71,7 @@ ipcMain.handle('app:open-explorer', async (event, reference = {}) => {
 ipcMain.handle('vault:import', async (_event, payload) => importVault(payload));
 ipcMain.handle('vault:unlock', async (_event, payload) => unlockVault(payload));
 ipcMain.handle('vault:lock', () => { lockVault(); return { locked: true }; });
+ipcMain.handle('vault:delete', () => deleteConnectedWallet(app.getPath('userData')));
 ipcMain.handle('wallet:summary', () => getWalletSummary());
 ipcMain.handle('wallet:get-activity', async () => {
   const address = getWalletSummary().address;
