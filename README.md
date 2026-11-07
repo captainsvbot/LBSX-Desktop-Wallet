@@ -59,6 +59,7 @@ no keys, and no build artifacts** — see
 - [Security model](#security-model)
 - [Feature deep dives](#feature-deep-dives)
 - [Download and install](#download-and-install)
+- [Generating a recovery phrase safely](#generating-a-recovery-phrase-safely)
 - [BananaBlocks API key](#bananablocks-api-key)
 - [Fees](#fees)
 - [Development](#development)
@@ -1200,6 +1201,46 @@ The installer is written to the `release-windows-<version>/` folder named in
 
 > The installer is currently **unsigned**, so Windows will show its standard
 > unknown-publisher prompt. The wallet UI shows the version as `v2.1.00`.
+
+---
+
+## Generating a recovery phrase safely
+
+The wallet is **import-only**: it never creates a recovery phrase. Create one
+outside the wallet, then import it. Any valid **BIP39** phrase works (12 or 24
+words are the common choices). The wallet uses the BIP44 path
+`m/44'/236'/0'/0/0` and only the first address on that path.
+
+**Option A: an offline BIP39 tool (free)**
+
+1. Download the standalone page `bip39-standalone.html` from the
+   [iancoleman/bip39 releases](https://github.com/iancoleman/bip39/releases).
+   Do **not** use a hosted website to make a real phrase.
+2. Disconnect from the internet (turn off Wi-Fi or unplug the cable), then open
+   the file in your browser. Ideally do this on a computer you trust, with
+   browser extensions disabled.
+3. Choose 12 or 24 words and generate. Write the words down by hand, in order.
+4. Before funding it, check the first address on the BSV `m/44'/236'/0'/0/0`
+   path matches the address the wallet shows after you import the same phrase.
+5. Close the page and clear the browser tab before reconnecting.
+
+**Option B: a hardware wallet or other trusted wallet** that can show you a
+BIP39 phrase. Different wallets use different derivation paths, so the address
+may not match. Import it and **compare the address** before sending funds.
+
+**Keep it safe**
+
+- Write it on paper (or metal), never a screenshot, photo, note app, email,
+  chat, or cloud drive.
+- Never type it into a website, and never share it. No one from LBSX,
+  BananaBlocks or GitHub will ask for it.
+- Store two copies in separate secure places. If you lose it, nobody can
+  recover your funds.
+- Import it, then send a **small test amount** and confirm you can see it
+  before moving more.
+
+This is general guidance, not a guarantee. You are responsible for your phrase;
+see the [Disclaimer](#disclaimer-no-warranty-no-liability).
 
 ---
 
