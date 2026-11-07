@@ -39,7 +39,8 @@ uses [BananaBlocks](https://bananablocks.com/) to read balances and broadcast.
   control, and runs on **Windows only** (not tested elsewhere).
 - It does **not** provide privacy: BananaBlocks sees the addresses you query.
 - It does **not** guarantee uptime or accuracy of balances. If BananaBlocks is
-  down or rate-limiting, the wallet cannot refresh or broadcast.
+  down or rate-limiting, the wallet cannot refresh balances and normally cannot
+  broadcast (see [Limitations](#limitations) for the one narrow exception).
 
 ---
 
@@ -87,8 +88,9 @@ Fees are not refundable. Check the review screen for the exact amounts.
 ## How your keys are handled
 
 - Your recovery phrase is **encrypted on disk** and decrypted in memory only
-  while the wallet is unlocked. Where available it uses the OS key store;
-  otherwise AES-256-GCM.
+  while the wallet is unlocked. You choose either **device protection** (the OS
+  key store via Electron `safeStorage`, no password) or a **vault password**
+  (at least 12 characters, scrypt key derivation, AES-256-GCM).
 - The phrase is never displayed again, copied from the app, or sent over the
   network. Transactions are signed locally.
 - **Locking** the wallet clears the unlocked phrase reference from memory.
@@ -110,7 +112,13 @@ Messages cannot be deleted.
 1. **Single data provider.** BananaBlocks is a hard dependency today. A
    configurable fallback provider is being worked on in
    [issue #2](../../issues/2) and is **not available yet**. In practice this is
-   not a known failure today; the work is hardening, not a bug fix.
+   not a known failure today; the work is hardening, not a bug fix. All balance,
+   token and history reads go through BananaBlocks only.
+   The single exception is broadcasting: if BananaBlocks rejects a transaction
+   with an ARC 461 script error (this affects some marketplace purchases), the
+   wallet retries the already-signed transaction through GorillaPool ARC and then
+   WhatsOnChain. Those services then see that transaction. This is a narrow,
+   hard-coded workaround, not a general fallback, and it is not configurable.
 2. **Not a full node.** SPV header checks prove a transaction's inclusion, not
    full chain validity or that an output is unspent. The indexer remains the
    source of truth for spend state.
