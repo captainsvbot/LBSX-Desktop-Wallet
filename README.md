@@ -1214,19 +1214,35 @@ words are the common choices). The wallet uses the BIP44 path
 **Option A: an offline BIP39 tool (free)**
 
 1. Download the standalone page `bip39-standalone.html` from the
-   [iancoleman/bip39 releases](https://github.com/iancoleman/bip39/releases).
-   Do **not** use a hosted website to make a real phrase.
+   [iancoleman/bip39 releases](https://github.com/iancoleman/bip39/releases)
+   (a PGP signature, `signature.txt.asc`, is published with it). Do **not** use
+   a hosted website to make a real phrase.
 2. Disconnect from the internet (turn off Wi-Fi or unplug the cable), then open
    the file in your browser. Ideally do this on a computer you trust, with
    browser extensions disabled.
-3. Choose 12 or 24 words and generate. Write the words down by hand, in order.
-4. Before funding it, check the first address on the BSV `m/44'/236'/0'/0/0`
+3. **Supply your own entropy.** We advise creating your own randomness (for
+   example dice rolls or cards) and entering it in the tool's entropy field
+   instead of trusting the page's "Generate Random Phrase" button alone. Some
+   community members have raised concerns about the quality of browser
+   pseudo-random number generators (PRNGs).
+   **The LBSX project has not audited this tool.** You should review the
+   offline code yourself (or have someone you trust do it) to confirm it does
+   not tamper with generation, even when you give it your own entropy. Compare
+   the phrase against a second, independent BIP39 implementation if you can.
+4. Write the words down by hand, in order.
+5. Before funding it, check the first address on the BSV `m/44'/236'/0'/0/0`
    path matches the address the wallet shows after you import the same phrase.
-5. Close the page and clear the browser tab before reconnecting.
+6. Close the page and clear the browser tab before reconnecting.
 
-**Option B: a hardware wallet or other trusted wallet** that can show you a
-BIP39 phrase. Different wallets use different derivation paths, so the address
-may not match. Import it and **compare the address** before sending funds.
+**Option B: generate it in another BSV wallet app.** A BSV wallet app such as
+SimplyCash, or a hardware wallet, can generate a recovery phrase for you, which
+you then import here. This is a reasonable alternative to a browser tool, but
+the same caution applies: the LBSX project has not audited those apps either.
+Different wallets use different derivation paths, so the address may not match.
+Import the phrase and **compare the address** before sending funds.
+
+For large amounts, a reputable hardware wallet is generally the safer way to
+create and store a phrase.
 
 **Keep it safe**
 
