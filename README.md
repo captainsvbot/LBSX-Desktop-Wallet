@@ -4,7 +4,7 @@
 computer, balances are verified against your own SPV header chain, and BSV-21
 tokens, locks, peer trading, and peer chat are built and signed locally.
 
-> **Version 2.0.1** (shown in the app as `v2.0.01`) · MIT licensed · Windows x64
+> **Version 2.0.2** (shown in the app as `v2.0.02`) · MIT licensed · Windows x64
 > · Electron 39 + React 18 + Vite 6
 
 LBSX Desktop Wallet is a local-first Electron wallet for BSV and BSV-21 assets.
@@ -302,9 +302,13 @@ a bounded upper bound on the hot paths.
 - The encrypted state document is a single JSON blob. Measured on this
   machine after real use: **3.63 MB**.
 - The growth drivers are all explicitly capped in the code:
-  `observedBsvUtxos` → 5,000; admin index transactions → 5,000; admin pending
+  admin index transactions → 5,000; admin pending
   → 1,000; activity detail lookups per sync → 500; Peer Chat feed → the last
   150 messages; BEEF proof size → 32 MB ceiling.
+- The wallet's own UTXO history is **not** capped. The scan follows the
+  indexer's cursor until the latest block has been covered, so a wallet with
+  thousands of outputs keeps every one of them in `observedBsvUtxos` and shows
+  them all in the **UTXO Store** tab under Security.
 - Activity rows are **merged by txid, not appended** — a re-sync of a known
   transaction updates the existing row rather than adding one, so repeated
   syncs do not grow the file.
@@ -485,6 +489,16 @@ Yes, and this was measured against the live network rather than estimated.
   exhausted. The wallet paces itself accordingly — a 250 ms minimum
   interval between calls, up to 3 retries, exponential backoff honouring
   `retry-after`, and a serialised request queue.
+- **The admin-wallet index screens transactions in bulk.** Instead of fetching
+  one detail per transaction, the Peer Chat / trading discovery index posts
+  **20 txids per request** to `POST /api/v1/bsv/main/txs` and only fetches a
+  native detail for the transactions that actually carry a protocol payload.
+  A 3,029-transaction admin-wallet history therefore costs roughly **380
+  requests instead of 3,029**. It runs on the **same shared request queue**
+  as the initial wallet sync, so a 429 slows the whole queue down rather
+  than failing the run, and the scan cursor (`adminWalletHistoryCursor`) is
+  persisted, so an interrupted or rate-limited run resumes where it stopped
+  instead of starting over.
 - The **API key is optional**. The wallet syncs and trades perfectly well
   without one; adding a key simply raises the ceiling and shortens the
   detail phase, which is where the time actually goes. Anonymous traffic
@@ -555,6 +569,7 @@ limits, which the configurable RPC fallback can route around entirely.
 | **BSV-21 Tools** | Mint a fixed-supply BSV-21 token with an embedded PNG/JPEG/WebP icon, atomically. |
 | **Peer Chat** | On-chain messages anchored to a shared discovery address. |
 | **Security center** | Vault status, active address, derivation path, and one-click lock. |
+| **UTXO Store** (Security tab) | Every saved output of the wallet: TXID, VOUT, value, type (`Spendable BSV`, `Token BUILD`, `Locked`, `Spent`, `Unverified`) and block height. Searchable, 20 rows per page. |
 | **API key** | Optional BananaBlocks API key, encrypted with the OS key store. |
 | **RPC endpoint** | Optional custom BSV RPC node used as the provider fallback, so a user can point the wallet at their own node and leave the public rate limits behind. |
 
@@ -603,7 +618,7 @@ limits, which the configurable RPC fallback can route around entirely.
 | `electron/token-wallet.cjs` | BSV/BSV-21 send, mint, lock, claim, peer-chat payloads. |
 | `electron/market.cjs` | Order book, listing, purchase, cancellation. |
 | `electron/trading.cjs` | Discovery: finds peer orders via the discovery (inclusion) address. |
-| `electron/admin-wallet-index.cjs` | Scans the discovery address's history for peer activity. |
+| `electron/admin-wallet-index.cjs` | Scans the discovery address's history for peer activity, screening transactions in bulk. |
 | `electron/peer-chat.cjs` | Parses and indexes on-chain chat messages. |
 | `electron/transaction-tracker.cjs` | Persist-before-broadcast, status reconciliation. |
 | `electron/bananablocks.cjs` | API-key storage and authenticated requests. |
@@ -666,6 +681,15 @@ Two design points worth calling out:
   its own error string. A token outage does not erase your BSV balance, and a
   UTXO verification failure does not discard the rest of the cache. The
   snapshot records all three error slots independently.
+- **The scan is not capped.** The unspent endpoint is read page by page,
+  following the server's continuation cursor until the latest block has been
+  covered, so a wallet with five hundred outputs and a wallet with five
+  million are both read in full. Every request shares one BananaBlocks
+  request budget: when the allowance for the current window is spent the
+  wallet waits for the window to roll over instead of hammering the API, and
+  a rate limited answer is retried with a growing backoff. The result is
+  listed in the **UTXO Store** tab under Security, where each output is
+  labelled `Spendable BSV`, `Token BUILD`, `Locked`, `Spent` or `Unverified`.
 
 ### How data is saved after syncing
 
@@ -774,7 +798,7 @@ locked — that is intentional.
 | SPV header sync | `spv/mainnet.headers` (separate file), `headerChain`, `proofs` |
 | Token send / mint / lock | `transactions`, `activities`, `tokenLocks`, `bsvUtxos`, `chainSnapshot` |
 | Peer Chat sync | `peerChatMessages`, `peerChatLastScannedTxid`, `peerChatSyncedAt` |
-| Trading discovery | `adminWalletTransactions`, `adminWalletPendingTransactions`, `adminWalletHistoryCursor` |
+| Trading discovery | `adminWalletTransactions`, `adminWalletPendingTransactions`, `adminWalletHistoryCursor`, `adminWalletHistoryComplete` |
 
 ### What is stored on disk
 
@@ -1108,6 +1132,26 @@ Peer Chat messages are written to the chain in a `safe` data output:
   confirmed.
 - The local cache keeps the most recent 150 messages.
 
+**Syncing the admin-wallet index.** "Sync messages" indexes the shared
+discovery address so the wallet can show peer activity and peer sell listings.
+It runs in two phases and reports progress as it goes:
+
+1. **Screening** — the discovery address's transaction history is listed
+   (cursor-paginated) and then screened **20 transactions per request**, so
+   thousands of transactions cost a couple of hundred requests instead of
+   thousands.
+2. **Verifying** — only the transactions that actually carry a protocol
+   payload are checked in detail: the `OP_RETURN` is decoded, the fee output
+   is matched against the discovery script, the transaction is confirmed, and
+   its inclusion is proven against the local header chain.
+
+The progress banner shows the phase, how many transactions have been checked,
+and how many candidate messages have been verified. When a run is interrupted
+by the API rate limit, the index keeps its cursor and the page says *"The API
+rate limit paused this sync — X of Y transactions checked. Sync again to
+continue."* rather than showing an error. Once the index is current, the page
+says *"Admin-wallet index is up to date — N transactions checked."*
+
 ### Activity history
 
 Activity refresh is incremental and designed for long-lived wallets:
@@ -1144,7 +1188,7 @@ npm ci
 npm run dist:win
 ```
 
-This produces an NSIS installer in `release-windows-2.0.1/`. It adds Start menu
+This produces an NSIS installer in `release-windows-2.0.02/`. It adds Start menu
 and desktop shortcuts and launches the wallet when installation finishes.
 Users then open **LBSX Desktop Wallet** like any other desktop application —
 no command prompt required.
@@ -1152,8 +1196,8 @@ no command prompt required.
 > The installer is currently **unsigned**, so Windows will show its standard
 > unknown-publisher prompt.
 
-The `package.json` version is the canonical SemVer `2.0.1`; the wallet UI
-presents it as `v2.0.01`.
+The `package.json` version is the canonical SemVer `2.0.2`; the wallet UI
+presents it as `v2.0.02`.
 
 ---
 
@@ -1201,6 +1245,7 @@ published standard test vector, and test keys are derived from fixed
 | `npm run test:token-wallet` | Token send conservation, lock tranche scripts, local locker persistence, and a matured claim. |
 | `npm run test:token-mint` | Atomic Ordinals image + BSV-21 deployment, mint metadata, local token tracking, fee/change accounting, and the admin index output. |
 | `npm run test:spv` | Genesis anchoring, BEEF inclusion, and invalid proof rejection. |
+| `npm run test:unspent-scan` | Unbounded paginated UTXO scan, both unspent page shapes, cursor following, and rate-limit recovery. |
 | `npm run test:trading` | Trading transaction construction. |
 | `npm run test:discovery` | Trading discovery snapshot. |
 | `npm run test:admin-index` | Admin-wallet index synchronisation. |
@@ -1218,6 +1263,7 @@ npm run test:wallet-data
 npm run test:token-wallet
 npm run test:token-mint
 npm run test:spv
+npm run test:unspent-scan
 npm run test:trading
 npm run test:discovery
 npm run test:admin-index
@@ -1267,7 +1313,7 @@ LBSX Desktop Wallet/
 ├── assets/                    # Icons and branding
 ├── index.html                 # Vite entry + CSP
 ├── vite.config.js
-├── package.json               # Canonical version 2.0.1
+├── package.json               # Canonical version 2.0.2
 ├── TRADING-PLAN.md            # Trading design and its limits
 ├── SECURITY.md                # Disclosure policy and threat model
 ├── CONTRIBUTING.md            # Contributor guide

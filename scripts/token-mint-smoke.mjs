@@ -39,8 +39,8 @@ function response(data, status = 200) {
 
 try {
   const fundingTx = new bsv.Transaction()
-    .from({ txid: '77'.repeat(32), vout: 0, satoshis: 2000000, script: p2pkh.toHex() })
-    .to(address, 1500000);
+    .from({ txid: '77'.repeat(32), vout: 0, satoshis: 60000000, script: p2pkh.toHex() })
+    .to(address, 55000000);
   await walletData.cacheVerifiedBsvUtxos(address, [{
     txid: fundingTx.id.toLowerCase(),
     vout: 0,
@@ -92,7 +92,13 @@ try {
   assert.equal(inscription.dec, '8');
   assert.equal(inscription.icon, '_0', 'the deployment references the image at vout 0 in the same transaction');
   assert.equal(mintTx.outputs[1].satoshis, 1);
-  assert.equal(mintTx.outputs[2].satoshis, 1);
+  assert.equal(mintTx.outputs[2].satoshis, 50000000, 'the 0.5 BSV mint service fee is paid to the admin wallet');
+  const mintMemo = mintTx.outputs[3];
+  assert.equal(mintMemo.satoshis, 0, 'the LBSX mint OP_RETURN carries 0 satoshis');
+  const mintMemoFields = mintMemo.script.chunks.slice(2).map(chunk => chunk.buf.toString('utf8'));
+  assert.deepEqual(mintMemoFields.slice(0, 3), ['LBSX', 'v2', 'mint']);
+  assert.equal(mintMemoFields[4], 'LBSXWALLET');
+  assert(mintMemoFields.includes('service_fee:50000000sat:wallet_maintenance'));
   assert.equal(mintTx.outputs[2].script.toHex(), bsv.Script.buildPublicKeyHashOut(ADMIN_DISCOVERY_ADDRESS).toHex(), 'a 1-satoshi admin index output is present');
   assert.equal(result.txid, mintTx.id.toLowerCase());
   assert.equal(result.imageTxid, result.txid);
@@ -191,7 +197,7 @@ try {
   assert(mintActivity, 'the combined image and deployment activity is saved locally');
   assert.equal(mintActivity.details.tokenId, result.tokenId);
   assert.equal(mintActivity.details.icon, result.icon);
-  assert.equal(mintActivity.details.walletInputSats, '1500000');
+  assert.equal(mintActivity.details.walletInputSats, '55000000');
   assert.equal(BigInt(mintActivity.details.walletInputSats) - BigInt(mintActivity.details.changeSats), BigInt(mintActivity.details.walletNetSpentSats));
   const mintOutputSats = mintTx.outputs.reduce((sum, output) => sum + BigInt(output.satoshis), 0n);
   const mintFee = BigInt(mintActivity.details.feeSats);
@@ -238,8 +244,8 @@ try {
   const rejectedAddress = rejectedKey.toAddress().toString();
   const rejectedP2pkh = bsv.Script.buildPublicKeyHashOut(rejectedAddress);
   const rejectedFundingTx = new bsv.Transaction()
-    .from({ txid: '88'.repeat(32), vout: 0, satoshis: 2000000, script: rejectedP2pkh.toHex() })
-    .to(rejectedAddress, 1500000);
+    .from({ txid: '88'.repeat(32), vout: 0, satoshis: 60000000, script: rejectedP2pkh.toHex() })
+    .to(rejectedAddress, 55000000);
   await walletData.cacheVerifiedBsvUtxos(rejectedAddress, [{
     txid: rejectedFundingTx.id.toLowerCase(),
     vout: 0,
@@ -277,7 +283,7 @@ try {
   assert.equal((await walletData.getSpendableBsvUtxos(rejectedAddress))[0].state, 'confirmed', 'inputs reserved for a rejected mint are released');
 
   const legacyRejectedTx = new bsv.Transaction()
-    .from({ txid: rejectedFundingTx.id.toLowerCase(), vout: 0, satoshis: 1500000, script: rejectedP2pkh.toHex() })
+    .from({ txid: rejectedFundingTx.id.toLowerCase(), vout: 0, satoshis: 55000000, script: rejectedP2pkh.toHex() })
     .to(rejectedAddress, 1000)
     .change(rejectedAddress)
     .feePerKb(1000)

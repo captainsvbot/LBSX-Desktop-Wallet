@@ -86,8 +86,8 @@ function parsePeerChatTransaction(txid, rawTxHex, details, indexedHeight = 0) {
   return null;
 }
 
-async function syncPeerChat(address) {
-  const index = await syncAdminWalletIndex(address);
+async function syncPeerChat(address, { onProgress = null } = {}) {
+  const index = await syncAdminWalletIndex(address, { onProgress });
   const prior = await getWalletPeerChatSnapshot(address);
   const messages = [];
   for (const transaction of index.transactions) {
@@ -111,6 +111,7 @@ async function syncPeerChat(address) {
     historyComplete: index.historyComplete,
     scannedTransactions: index.scannedTransactions,
     lookupFailures: index.lookupFailures,
+    status: index.status || null,
     errors: index.errors,
   };
 }
@@ -127,6 +128,7 @@ async function getPeerChatSnapshot(address) {
     historyComplete: index.historyComplete,
     scannedTransactions: 0,
     lookupFailures: 0,
+    status: index.status || null,
     errors: [],
   };
 }

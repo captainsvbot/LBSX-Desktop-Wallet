@@ -11,6 +11,7 @@ const TXID_RE = /^[0-9a-f]{64}$/i;
 const MAX_ADMIN_INDEX_TRANSACTIONS = 5000;
 const MAX_ADMIN_INDEX_PENDING_TRANSACTIONS = 1000;
 const MAX_ADMIN_INDEX_TX_BYTES = 4 * 1024 * 1024;
+const UTXO_STORE_PAGE_SIZE = 20;
 const writeQueues = new Map();
 
 function addressHash(address) {
@@ -586,7 +587,7 @@ async function cacheVerifiedTokenUtxo(address, row) {
 async function cacheObservedBsvUtxos(address, rows, { complete = false } = {}) {
   if (!Array.isArray(rows)) throw new Error('The observed BSV UTXO snapshot must be a list.');
   return updateWalletData(address, data => {
-    data.observedBsvUtxos = rows.slice(0, 5000).flatMap(row => {
+    const observed = rows.flatMap(row => {
       const txid = String(row?.tx_hash || row?.txid || '').toLowerCase();
       const vout = Number(row?.tx_pos ?? row?.vout);
       const satoshis = Number(row?.value ?? row?.satoshis);
@@ -597,8 +598,9 @@ async function cacheObservedBsvUtxos(address, rows, { complete = false } = {}) {
         observedAt: new Date().toISOString(),
       }];
     });
+    data.observedBsvUtxos = observed;
     if (complete) {
-      const present = new Set(data.observedBsvUtxos.map(row => row.outpoint));
+      const present = new Set(observed.map(row => row.outpoint));
       for (const row of data.bsvUtxos) {
         if (row.state === 'confirmed' && !present.has(row.outpoint)) {
           row.state = 'spent';
@@ -628,6 +630,137 @@ async function getSpendableTokenUtxos(address, tokenId) {
     .map(({ txid, vout, satoshis, scriptHex, rawTxHex, tokenId: id, amount, state, spvVerified, proofHeight, proofBlockHash }) => ({
       txid, vout, satoshis, scriptHex, rawTxHex, tokenId: id, amount, state, spvVerified, proofHeight, proofBlockHash,
     }));
+}
+
+function tokenSymbolMap(data) {
+  const symbols = new Map();
+  const add = (tokenId, symbol) => {
+    const id = String(tokenId || '').toLowerCase();
+    if (!id || symbols.has(id)) return;
+    const label = String(symbol || '').trim();
+    if (label) symbols.set(id, label);
+  };
+  for (const token of data.importedTokens || []) add(token?.tokenId, token?.symbol || token?.name);
+  for (const token of data.chainSnapshot?.tokens || []) add(token?.tokenId, token?.symbol || token?.name);
+  return symbols;
+}
+
+function isLockedScript(scriptHex) {
+  const hex = String(scriptHex || '').toLowerCase();
+  if (!hex.includes('b17576a914')) return false;
+  return /b17576a914[0-9a-f]{40}88ac$/.test(hex);
+}
+
+async function getWalletUtxoStore(address, { query = '', page = 1, pageSize = UTXO_STORE_PAGE_SIZE } = {}) {
+  const data = await getWalletData(address);
+  const symbols = tokenSymbolMap(data);
+  const rows = new Map();
+
+  for (const row of data.observedBsvUtxos || []) {
+    if (!row?.outpoint) continue;
+    rows.set(row.outpoint, {
+      txid: String(row.txid || '').toLowerCase(),
+      vout: Number(row.vout),
+      satoshis: Number(row.satoshis),
+      height: Number.isSafeInteger(Number(row.height)) && Number(row.height) > 0 ? Number(row.height) : null,
+      scriptHex: null,
+      tokenId: null,
+      state: 'observed',
+      verified: false,
+    });
+  }
+  for (const row of data.bsvUtxos || []) {
+    if (!row?.outpoint) continue;
+    const existing = rows.get(row.outpoint);
+    rows.set(row.outpoint, {
+      ...(existing || {}),
+      txid: String(row.txid || existing?.txid || '').toLowerCase(),
+      vout: Number(row.vout),
+      satoshis: Number(row.satoshis),
+      height: Number.isSafeInteger(Number(row.proofHeight)) && Number(row.proofHeight) > 0
+        ? Number(row.proofHeight)
+        : (existing?.height ?? null),
+      scriptHex: row.scriptHex || existing?.scriptHex || null,
+      tokenId: null,
+      state: String(row.state || 'confirmed'),
+      verified: row.verified === true,
+    });
+  }
+  for (const row of data.tokenUtxos || []) {
+    if (!row?.outpoint) continue;
+    const existing = rows.get(row.outpoint);
+    rows.set(row.outpoint, {
+      ...(existing || {}),
+      txid: String(row.txid || existing?.txid || '').toLowerCase(),
+      vout: Number(row.vout),
+      satoshis: Number(row.satoshis),
+      height: Number.isSafeInteger(Number(row.proofHeight)) && Number(row.proofHeight) > 0
+        ? Number(row.proofHeight)
+        : (existing?.height ?? null),
+      scriptHex: row.scriptHex || existing?.scriptHex || null,
+      tokenId: String(row.tokenId || '').toLowerCase() || null,
+      state: String(row.state || 'confirmed'),
+      verified: row.verified === true,
+    });
+  }
+
+  const list = [...rows.values()].filter(row => !['spent', 'orphaned'].includes(row.state)).map(row => {
+    let type = 'unverified';
+    let typeLabel = 'Unverified';
+    if (row.tokenId) {
+      type = 'token';
+      typeLabel = symbols.get(row.tokenId) ? `Token ${symbols.get(row.tokenId)}` : 'Token';
+    } else if (isLockedScript(row.scriptHex)) {
+      type = 'locked';
+      typeLabel = 'Locked';
+    } else if (row.state === 'spent') {
+      type = 'spent';
+      typeLabel = 'Spent';
+    } else if (row.verified === true && ['confirmed', 'pending'].includes(row.state)) {
+      type = 'spendable';
+      typeLabel = 'Spendable BSV';
+    }
+    return {
+      txid: row.txid,
+      vout: row.vout,
+      satoshis: Number.isSafeInteger(row.satoshis) ? row.satoshis : 0,
+      type,
+      typeLabel,
+      blockHeight: row.height,
+    };
+  });
+
+  const needle = String(query || '').trim().toLowerCase();
+  const filtered = needle
+    ? list.filter(row => row.txid.includes(needle)
+      || String(row.vout) === needle
+      || row.typeLabel.toLowerCase().includes(needle)
+      || (row.blockHeight != null && String(row.blockHeight) === needle))
+    : list;
+
+  filtered.sort((a, b) => {
+    const heightA = a.blockHeight ?? -1;
+    const heightB = b.blockHeight ?? -1;
+    if (heightA !== heightB) return heightB - heightA;
+    if (a.satoshis !== b.satoshis) return b.satoshis - a.satoshis;
+    return a.vout - b.vout;
+  });
+
+  const size = Math.min(100, Math.max(1, Number(pageSize) || UTXO_STORE_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filtered.length / size));
+  const current = Math.min(pageCount, Math.max(1, Number(page) || 1));
+  const start = (current - 1) * size;
+  const counts = { spendable: 0, token: 0, locked: 0, spent: 0, unverified: 0 };
+  for (const row of filtered) counts[row.type] = (counts[row.type] || 0) + 1;
+  return {
+    rows: filtered.slice(start, start + size),
+    total: filtered.length,
+    counts,
+    page: current,
+    pageSize: size,
+    pageCount,
+    lastSyncedAt: data.lastUtxoSyncAt || null,
+  };
 }
 
 async function getWalletHeaderChain(address) {
@@ -1128,6 +1261,7 @@ module.exports = {
   cacheObservedBsvUtxos,
   getSpendableBsvUtxos,
   getSpendableTokenUtxos,
+  getWalletUtxoStore,
   getSpendableUtxoBlocklist,
   getWalletHeaderChain,
   saveWalletHeaderChain,

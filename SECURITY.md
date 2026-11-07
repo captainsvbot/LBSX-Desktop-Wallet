@@ -19,7 +19,7 @@ Please include:
 
 - A description of the issue and its impact.
 - Steps to reproduce, ideally with a test script.
-- The wallet build version (`v2.0.01` / package version `2.0.1`) and platform.
+- The wallet build version (`v2.0.02` / package version `2.0.2`) and platform.
 - Whether the issue requires a real wallet, a funded wallet, or only a
   synthetic one.
 

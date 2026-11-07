@@ -15,7 +15,7 @@ Module._load = function(request, parent, isMain) {
   }
   return originalLoad.call(this, request, parent, isMain);
 };
-const { parseOrderAnnouncement, verifyLiveSellOrder, ADMIN_DISCOVERY_ADDRESS } = require('../electron/trading.cjs');
+const { parseOrderAnnouncement, verifyLiveSellOrder, verifyLiveBuyOrder, ADMIN_DISCOVERY_ADDRESS } = require('../electron/trading.cjs');
 Module._load = originalLoad;
 const key = bsv.PrivateKey.fromBuffer(Buffer.alloc(32, 17));
 const maker = key.toAddress().toString();
@@ -47,4 +47,25 @@ assert.equal(order?.amountBase, amountBase);
 assert.equal(order?.sellerAddress, maker);
 assert.equal(await verifyLiveSellOrder(txid, raw, { ...parsed, amt: '201' }, true), null, 'announcement amount must match the on-chain BSV-21 inscription');
 assert.equal(await verifyLiveSellOrder(txid, raw, parsed, false), null, 'unconfirmed admin anchors are not presented as confirmed peer orders');
+const purchase = new Transaction();
+purchase.addInput({ sourceTXID: '44'.repeat(32), sourceOutputIndex: 1, unlockingScript: new sdk.UnlockingScript() });
+purchase.addInput({ sourceTXID: '45'.repeat(32), sourceOutputIndex: 0, unlockingScript: new sdk.UnlockingScript() });
+purchase.addOutput({ lockingScript: BSV21.transfer(tokenId, BigInt(amountBase)).lock(new P2PKH().lock(maker)), satoshis: 1 });
+purchase.addOutput({ lockingScript: new P2PKH().lock(ADMIN_DISCOVERY_ADDRESS), satoshis: 10150 });
+const buyRecord = {
+  p: 'lbsx', v: 1, op: 'buy', net: 'main', id: tokenId, amt: amountBase, price: 15000,
+  buyer: maker, src: `${'44'.repeat(32)}.1`, receive: 0, anchor: ADMIN_DISCOVERY_ADDRESS,
+};
+const buyJson = Buffer.from(JSON.stringify(buyRecord));
+const buyPush = buyJson.length <= 75 ? Buffer.from([buyJson.length]) : buyJson.length <= 255 ? Buffer.from([0x4c, buyJson.length]) : Buffer.from([0x4d, buyJson.length & 0xff, buyJson.length >> 8]);
+purchase.addOutput({ lockingScript: Script.fromBinary(Buffer.concat([Buffer.from([0, 0x6a]), buyPush, buyJson])), satoshis: 0 });
+const purchaseHex = purchase.toHex();
+const purchaseTxid = purchase.id('hex').toLowerCase();
+const parsedBuy = parseOrderAnnouncement(purchaseHex);
+assert.deepEqual(parsedBuy, buyRecord, 'sync parser should extract the versioned LBSX buy OP_RETURN');
+const verifiedPurchase = await verifyLiveBuyOrder(purchaseTxid, purchaseHex, parsedBuy, true);
+assert.equal(verifiedPurchase?.buyer, maker);
+assert.equal(verifiedPurchase?.sourceOutpoint, `${'44'.repeat(32)}.1`);
+assert.equal(await verifyLiveBuyOrder(purchaseTxid, purchaseHex, { ...buyRecord, price: 20000 }, true), null, 'buy record must be anchored by the required 1% plus service fee');
+assert.equal(await verifyLiveBuyOrder(purchaseTxid, purchaseHex, buyRecord, false), null, 'unconfirmed buy announcements are not presented as confirmed purchases');
 console.log('PASS: peer discovery parses announcements and validates the live OrdLock/BSV-21 output');

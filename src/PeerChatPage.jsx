@@ -40,7 +40,7 @@ function formatDateLabel(timestamp) {
 function timeAgo(timestamp) {
   const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
   if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
+    if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
@@ -447,7 +447,7 @@ function PeerChatFeatureCards() {
   </div>;
 }
 
-export default function PeerChatPage({ wallet, snapshot, syncing, error, onSync, onSent, onGo, tokens = [], onTokenTipSent }) {
+export default function PeerChatPage({ wallet, snapshot, syncing, error, notice = '', status = null, onSync, onSent, onGo, tokens = [], onTokenTipSent }) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
@@ -460,6 +460,15 @@ export default function PeerChatPage({ wallet, snapshot, syncing, error, onSync,
   const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
   const peers = useMemo(() => buildPeers(messages, wallet?.address), [messages, wallet?.address]);
   const recentPeerCount = peers.filter(peer => peer.isRecent).length;
+  const statusLine = useMemo(() => {
+    if (!status) return '';
+    const checked = Number(status.checked || 0).toLocaleString();
+    const total = Number(status.total || 0).toLocaleString();
+    const indexed = Number(status.indexed || 0).toLocaleString();
+    if (status.phase === 'complete') return `Admin-wallet index is up to date — ${indexed} transactions checked.`;
+    if (status.phase === 'paused') return `The API rate limit paused this sync — ${checked} of ${total} transactions checked. Sync again to continue.`;
+    return `Checking admin-wallet transactions — ${checked} of ${total}.`;
+  }, [status]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -511,6 +520,8 @@ export default function PeerChatPage({ wallet, snapshot, syncing, error, onSync,
       <p>Community chat — permanently stored on the BSV blockchain</p>
     </header>
     {error && <div className="sync-error" role="alert">{error}</div>}
+    {!error && statusLine && <div className="pc-sync-status" role="status">{statusLine}</div>}
+    {!error && notice && <div className="pc-sync-status" role="status">{notice}</div>}
     {sendError && <div className="pc-error" role="alert"><span>{sendError}</span><button type="button" onClick={() => setSendError('')} aria-label="Dismiss error">×</button></div>}
 
     <section className="pc-panel" aria-label="Peer Chat">
@@ -587,7 +598,7 @@ export default function PeerChatPage({ wallet, snapshot, syncing, error, onSync,
               {sending ? <Loader2 size={15} className="spin" /> : <Send size={15} />}
             </button>
           </div>
-          <p className="pc-composer-footnote">{MAX_MESSAGE_LENGTH - draft.length}/500 characters · Shift+Enter for a new line</p>
+          <p className="pc-composer-footnote">{draft.length}/{MAX_MESSAGE_LENGTH} characters · Shift+Enter for a new line</p>
         </form>
       </div>
     </section>

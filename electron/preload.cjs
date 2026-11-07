@@ -16,13 +16,27 @@ contextBridge.exposeInMainWorld('lbsx', Object.freeze({
     ipcRenderer.on('wallet:spv-progress', listener);
     return () => ipcRenderer.removeListener('wallet:spv-progress', listener);
   },
+  onActivityProgress: (callback) => {
+    if (typeof callback !== 'function') throw new Error('An activity progress callback is required.');
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('wallet:activity-progress', listener);
+    return () => ipcRenderer.removeListener('wallet:activity-progress', listener);
+  },
+  onPeerChatProgress: (callback) => {
+    if (typeof callback !== 'function') throw new Error('A peer chat progress callback is required.');
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('wallet:peer-chat-progress', listener);
+    return () => ipcRenderer.removeListener('wallet:peer-chat-progress', listener);
+  },
   getWalletActivity: () => ipcRenderer.invoke('wallet:get-activity'),
   syncWalletActivity: () => ipcRenderer.invoke('wallet:sync-activity'),
   checkPendingTransactionStatuses: () => ipcRenderer.invoke('wallet:check-pending-statuses'),
   getImportedTokens: () => ipcRenderer.invoke('wallet:get-imported-tokens'),
+  getUtxoStore: (payload) => ipcRenderer.invoke('wallet:utxo-store', payload),
   saveImportedToken: (token) => ipcRenderer.invoke('wallet:save-imported-token', token),
   getTokenIcon: (token) => ipcRenderer.invoke('token:get-icon', token),
   sendBsv: (payload) => ipcRenderer.invoke('wallet:send-bsv', payload),
+  estimateBsvSend: (payload) => ipcRenderer.invoke('wallet:estimate-bsv-send', payload),
   mintBsv21Token: (payload) => ipcRenderer.invoke('wallet:mint-bsv21', payload),
   syncTradingDiscovery: () => ipcRenderer.invoke('trading:sync-discovery'),
   getTradingDiscoveryCache: () => ipcRenderer.invoke('trading:get-discovery-cache'),

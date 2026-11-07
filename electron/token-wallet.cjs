@@ -3,7 +3,7 @@ const path = require('node:path');
 const { app } = require('electron');
 const bsvModule = require('bsv');
 const bsv = bsvModule.default || bsvModule;
-const { bananaBlocksFetch } = require('./bananablocks.cjs');
+const { bananaBlocksFetch, waitForRateLimitBudget } = require('./bananablocks.cjs');
 const {
   cacheVerifiedBsvUtxos,
   cacheVerifiedTokenUtxos,
@@ -18,12 +18,16 @@ const {
 } = require('./wallet-data.cjs');
 const { broadcastTrackedTransaction, reconcileDefinitivelyRejectedTransactions } = require('./transaction-tracker.cjs');
 const { ADMIN_DISCOVERY_ADDRESS } = require('./constants.cjs');
+const BSV_SEND_SERVICE_FEE_SATS = 10000;
+const TOKEN_MINT_SERVICE_FEE_SATS = 50000000;
 const { ensureHeaderChain, verifyTransactionProof } = require('./spv.cjs');
+const { fetchAllUnspentUtxos } = require('./bsv-unspent.cjs');
 const { encryptPeerChatContent } = require('./peer-chat-crypto.cjs');
 
 const API = 'https://bananablocks.com/api/v1';
 const SCHEDULE_SECONDS = { daily: 86400, weekly: 604800, monthly: 2592000, yearly: 31536000 };
 const TXID_RE = /^[0-9a-f]{64}$/i;
+const API_MAX_RETRIES = 5;
 const MAX_BSV21_AMOUNT = (1n << 64n) - 1n;
 
 async function getLocks(address) {
@@ -49,10 +53,18 @@ async function saveLocks(address, rows) {
 }
 
 async function json(url, options = {}) {
-  const response = await bananaBlocksFetch(url, { headers: { Accept: 'application/json', ...options.headers }, signal: AbortSignal.timeout(20000), ...options });
-  const bodyText = await response.text();
-  if (!response.ok) throw new Error(`BananaBlocks returned HTTP ${response.status}${bodyText ? `: ${bodyText.slice(0, 160)}` : ''}`);
-  try { return JSON.parse(bodyText); } catch { throw new Error('BananaBlocks returned an unreadable response.'); }
+  for (let attempt = 0; attempt <= API_MAX_RETRIES; attempt++) {
+    await waitForRateLimitBudget();
+    const response = await bananaBlocksFetch(url, { headers: { Accept: 'application/json', ...options.headers }, signal: AbortSignal.timeout(20000), ...options });
+    if (response.status === 429 && attempt < API_MAX_RETRIES) {
+      await response.text().catch(() => '');
+      continue;
+    }
+    const bodyText = await response.text();
+    if (!response.ok) throw new Error(`BananaBlocks returned HTTP ${response.status}${bodyText ? `: ${bodyText.slice(0, 160)}` : ''}`);
+    try { return JSON.parse(bodyText); } catch { throw new Error('BananaBlocks returned an unreadable response.'); }
+  }
+  throw new Error('BananaBlocks returned HTTP 429: rate limit exceeded');
 }
 
 function push(data) {
@@ -294,7 +306,72 @@ async function broadcastRawHex(rawtx, expected) {
       last = error.message;
     }
   }
+  // BananaBlocks' ARC can validate scripts with pre-Chronicle rules and reject
+  // valid Chronicle-era scripts (e.g. OrdLock v2 purchases use OP_2MUL) with ARC 461.
+  if (/ARC 461/i.test(last)) {
+    let arcRejection = null;
+    try {
+      const relayed = await broadcastViaGorillaPoolArc(rawtx, expected);
+      if (relayed) return relayed;
+    } catch (error) {
+      if (error?.code !== 'BROADCAST_REJECTED') throw error;
+      arcRejection = error;
+    }
+    const relayed = await broadcastViaWhatsOnChain(rawtx, expected);
+    if (relayed) return relayed;
+    if (arcRejection) throw arcRejection;
+  }
   throw new Error(`BananaBlocks did not confirm broadcast acceptance. Check the transaction before retrying. ${last}`);
+}
+
+async function broadcastViaGorillaPoolArc(rawtx, expected) {
+  let response;
+  let text;
+  try {
+    response = await fetch('https://arc.gorillapool.io/v1/tx', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawTx: rawtx }),
+      signal: AbortSignal.timeout(20000),
+    });
+    text = await response.text();
+  } catch { return null; }
+  let entry;
+  try { entry = JSON.parse(text); } catch { return null; }
+  const status = String(entry?.txStatus || '');
+  const accepted = response.ok
+    && ['QUEUED', 'RECEIVED', 'STORED', 'ANNOUNCED_TO_NETWORK', 'REQUESTED_BY_NETWORK', 'SENT_TO_NETWORK', 'ACCEPTED_BY_NETWORK', 'SEEN_ON_NETWORK', 'MINED'].includes(status)
+    && String(entry?.txid || '').toLowerCase() === expected;
+  if (accepted) return expected;
+  if (status === 'REJECTED' || status === 'DOUBLE_SPEND_ATTEMPTED' || (response.status >= 400 && response.status < 500 && entry?.status >= 400)) {
+    const detail = [entry?.title, entry?.detail, entry?.extraInfo].filter(value => typeof value === 'string' && value).join(' - ');
+    const error = new Error(`The transaction was rejected by the network relay: ${detail.slice(0, 180) || status}`);
+    error.code = 'BROADCAST_REJECTED';
+    throw error;
+  }
+  return null;
+}
+
+async function broadcastViaWhatsOnChain(rawtx, expected) {
+  let response;
+  let text;
+  try {
+    response = await fetch('https://api.whatsonchain.com/v1/bsv/main/tx/raw', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ txhex: rawtx }),
+      signal: AbortSignal.timeout(30000),
+    });
+    text = await response.text();
+  } catch { return null; }
+  const reported = String(text || '').replace(/["\s]/g, '').toLowerCase();
+  if (response.ok && reported === expected) return expected;
+  if (response.status >= 400 && response.status < 500 && /mandatory-script-verify|script|bad-txns|missing inputs|txn-/i.test(text)) {
+    const error = new Error(`The transaction was rejected by the network relay: ${String(text).replace(/\s+/g, ' ').slice(0, 220)}`);
+    error.code = 'BROADCAST_REJECTED';
+    throw error;
+  }
+  return null;
 }
 
 async function broadcast(tx) {
@@ -487,8 +564,7 @@ async function fetchCashInputs(address, neededSatoshis) {
     } catch {}
   }
 
-  const rows = await json(`${API}/bsv/main/address/${encodeURIComponent(address)}/unspent?limit=500`);
-  const items = Array.isArray(rows) ? rows : (rows?.items || []);
+  const items = await fetchAllUnspentUtxos(address);
   const verified = await verifyCashUtxoRows(address, items, {
     minimumSatoshis: neededSatoshis,
     selectedOutpoints,
@@ -525,10 +601,9 @@ async function verifyCashUtxoRows(address, rows, {
   const parentCache = new Map();
   const verified = [];
   let failures = 0;
-  const candidatesToVerify = candidates.slice(0, 100);
-  onProgress?.({ completed: 0, total: candidatesToVerify.length });
-  for (let index = 0; index < candidatesToVerify.length; index++) {
-    const row = candidatesToVerify[index];
+  onProgress?.({ completed: 0, total: candidates.length });
+  for (let index = 0; index < candidates.length; index++) {
+    const row = candidates[index];
     try {
       const txid = String(row.tx_hash).toLowerCase();
       const vout = Number(row.tx_pos);
@@ -545,16 +620,14 @@ async function verifyCashUtxoRows(address, rows, {
         }));
         parentCache.set(txid, parentPromise);
       }
-      const [txo, spend, parentData] = await Promise.all([
+      const [txo, parentData] = await Promise.all([
         json(`${API}/txo/${txid}/${vout}`),
-        json(`${API}/txo/${txid}/${vout}/spend`),
         parentPromise,
       ]);
       const parent = parentData.transaction;
       const output = parent.outputs[vout];
       const indexedHeight = Number(row.height ?? row.block_height ?? 0);
       if (txo?.spent || txo?.spend_unknown === true || txo?.unknown === true
-        || spend?.spent || spend?.spend_unknown === true || spend?.unknown === true
         || txo?.address !== address || txo?.script_type !== 'p2pkh'
         || (Number.isSafeInteger(indexedHeight) && indexedHeight > 0 && indexedHeight !== parentData.blockHeight)
         || !output || output.satoshis !== Number(row.value) || output.script.toHex() !== expectedScript) continue;
@@ -571,7 +644,7 @@ async function verifyCashUtxoRows(address, rows, {
       failures++;
       if (process.env.LBSX_DEBUG_SEND === '1') console.warn('Skipping unverified cash UTXO', row?.tx_hash, error.message);
     } finally {
-      onProgress?.({ completed: index + 1, total: candidatesToVerify.length });
+      onProgress?.({ completed: index + 1, total: candidates.length });
     }
   }
   await cacheVerifiedBsvUtxos(address, verified);
@@ -581,7 +654,6 @@ async function verifyCashUtxoRows(address, rows, {
     verifiedCount: verified.length,
     failures,
     candidatesCount: candidates.length,
-    limited: cacheAll && candidates.length > 100,
   };
 }
 
@@ -614,20 +686,30 @@ async function syncSpendableBsvUtxos(address, rows, onProgress = null) {
   });
 }
 
-async function sendBsv(privateKey, payload = {}) {
+async function buildBsvSend(privateKey, payload = {}) {
   const address = privateKey.toAddress().toString();
   const recipient = String(payload.recipient || '').trim();
   if (!bsv.Address.isValid(recipient, 'livenet')) throw new Error('Enter a valid BSV mainnet recipient address.');
   const amountSats = bsvToSatoshis(payload.amount);
   const note = String(payload.note || '').trim();
   if (Buffer.byteLength(note, 'utf8') > 200) throw new Error('The public payment note must be 200 bytes or less.');
-  const inputs = await fetchCashInputs(address, amountSats + 1000);
-  const tx = new bsv.Transaction().from(inputs).to(recipient, amountSats);
-  if (note) {
-    const script = bsv.Script.buildSafeDataOut(['LBSX', 'v1', 'payment', `msg:${note}`]);
-    tx.addOutput(new bsv.Transaction.Output({ script, satoshis: 0 }));
-  }
+  const inputs = await fetchCashInputs(address, amountSats + BSV_SEND_SERVICE_FEE_SATS + 1000);
+  const tx = new bsv.Transaction().from(inputs).to(recipient, amountSats).to(ADMIN_DISCOVERY_ADDRESS, BSV_SEND_SERVICE_FEE_SATS);
+  const timestamp = new Date().toISOString();
+  const memo = ['LBSX', 'v2', 'bsv_send', address, recipient, String(amountSats), timestamp, `service_fee:${BSV_SEND_SERVICE_FEE_SATS}sat:wallet_maintenance`];
+  if (note) memo.push(`msg:${note}`);
+  tx.addOutput(new bsv.Transaction.Output({ script: bsv.Script.buildSafeDataOut(memo), satoshis: 0 }));
   tx.change(address).feePerKb(1000).sign(privateKey);
+  return { address, recipient, amountSats, inputs, tx };
+}
+
+async function estimateBsvSendFee(privateKey, payload = {}) {
+  const { amountSats, tx } = await buildBsvSend(privateKey, payload);
+  return { feeSats: tx.getFee(), amountSats, serviceFeeSats: BSV_SEND_SERVICE_FEE_SATS, sizeBytes: tx.toString().length / 2 };
+}
+
+async function sendBsv(privateKey, payload = {}) {
+  const { address, recipient, amountSats, inputs, tx } = await buildBsvSend(privateKey, payload);
   const feeSats = tx.getFee();
   const txid = tx.id.toLowerCase();
   await broadcastTrackedTransaction({
@@ -636,10 +718,10 @@ async function sendBsv(privateKey, payload = {}) {
     rawHex: tx.toString(),
     type: 'bsv-send',
     inputOutpoints: inputs.map(input => `${input.txid}.${input.vout}`),
-    details: { title: 'BSV sent', amountSats, recipient, feeSats },
+    details: { title: 'BSV sent', amountSats, recipient, feeSats, serviceFeeSats: BSV_SEND_SERVICE_FEE_SATS },
     broadcast: () => broadcastRawHex(tx.toString(), txid),
   });
-  return { txid, recipient, amountSats, feeSats };
+  return { txid, recipient, amountSats, feeSats, serviceFeeSats: BSV_SEND_SERVICE_FEE_SATS };
 }
 
 async function sendPeerChatMessage(privateKey, payload = {}) {
@@ -681,8 +763,8 @@ async function sendPeerChatMessage(privateKey, payload = {}) {
 async function mintBsv21Token(privateKey, payload = {}) {
   const address = privateKey.toAddress().toString();
   const symbol = String(payload.symbol || '').trim();
-  if (!symbol || symbol.length > 32 || /[\x00-\x1f\x7f]/.test(symbol)) {
-    throw new Error('Enter a token ticker between 1 and 32 printable characters.');
+  if (!/^[A-Za-z0-9]{1,28}$/.test(symbol)) {
+    throw new Error('Enter a token ticker of 1 to 28 letters or numbers.');
   }
   const decimals = Number(payload.decimals);
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) throw new Error('Choose between 0 and 18 token decimal places.');
@@ -691,7 +773,7 @@ async function mintBsv21Token(privateKey, payload = {}) {
   const image = parseMintImage(payload.imageDataUrl, payload.imageName);
 
   const tx = new bsv.Transaction();
-  const inputs = await fetchCashInputs(address, image.imageBytes.length + 25000);
+  const inputs = await fetchCashInputs(address, image.imageBytes.length + 25000 + TOKEN_MINT_SERVICE_FEE_SATS);
   tx.from(inputs);
   tx.addOutput(new bsv.Transaction.Output({
     script: ordinalImageScript(image.imageBytes, image.mimeType, address),
@@ -701,7 +783,11 @@ async function mintBsv21Token(privateKey, payload = {}) {
     script: bsv21DeployScript(address, symbol, amountBase, decimals, '_0'),
     satoshis: 1,
   }));
-  tx.to(ADMIN_DISCOVERY_ADDRESS, 1);
+  tx.to(ADMIN_DISCOVERY_ADDRESS, TOKEN_MINT_SERVICE_FEE_SATS);
+  tx.addOutput(new bsv.Transaction.Output({
+    script: bsv.Script.buildSafeDataOut(['LBSX', 'v2', 'mint', address, symbol, String(amountBase), String(decimals), new Date().toISOString(), `service_fee:${TOKEN_MINT_SERVICE_FEE_SATS}sat:wallet_maintenance`]),
+    satoshis: 0,
+  }));
   tx.change(address).feePerKb(1000).sign(privateKey);
 
   const txid = tx.id.toLowerCase();
@@ -724,6 +810,7 @@ async function mintBsv21Token(privateKey, payload = {}) {
       imageMimeType: image.mimeType,
       imageFilename: image.filename,
       adminIndexOutpoint,
+      serviceFeeSats: TOKEN_MINT_SERVICE_FEE_SATS,
     },
     broadcast: () => broadcastRawHex(tx.toString(), txid),
   });
@@ -749,6 +836,7 @@ async function mintBsv21Token(privateKey, payload = {}) {
     decimals,
     icon: iconOutpoint,
     adminIndexOutpoint,
+    serviceFeeSats: TOKEN_MINT_SERVICE_FEE_SATS,
   };
 }
 
@@ -941,7 +1029,7 @@ async function reconcileLocks(address, tokenId) {
 }
 
 module.exports = {
-  sendBsv, sendPeerChatMessage, sendToken, mintBsv21Token, createTokenLock, claimTokenLock, getTokenLocks: reconcileLocks, migrateLegacyTokenLocks, getTokenIconData,
+  sendBsv, estimateBsvSendFee, sendPeerChatMessage, sendToken, mintBsv21Token, createTokenLock, claimTokenLock, getTokenLocks: reconcileLocks, migrateLegacyTokenLocks, getTokenIconData,
   _market: { fetchSpendableTokenOutput, syncSpendableBsvUtxos, broadcastRawHex },
   _test: {
     transferScript,

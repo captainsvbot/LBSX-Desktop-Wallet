@@ -54,3 +54,107 @@
 .delete-wallet-input{width:100%;height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(237,120,109,.24);background:rgba(255,255,255,.04);color:#f2f7f4;font:600 12px var(--display);letter-spacing:.08em}
 .delete-wallet-input::placeholder{color:#5f6d66;letter-spacing:.08em}
 .delete-wallet-input:focus{outline:none;border-color:rgba(237,120,109,.5)}
+
+/* Security tabs and the UTXO Store */
+.security-tabs{display:flex;gap:6px;margin:0 0 15px;border-bottom:1px solid var(--line);padding-bottom:11px}
+.security-tab{border:1px solid transparent;border-radius:10px;background:transparent;color:#8c9a93;font:600 11px var(--display);letter-spacing:.04em;padding:8px 14px;transition:color .15s,background .15s,border-color .15s}
+.security-tab:hover{color:#d6e2db}
+.security-tab.active{color:#0f1c16;background:linear-gradient(135deg,#a0ebbf,#61d396);border-color:rgba(137,233,179,.55);box-shadow:0 5px 16px rgba(85,205,139,.12)}
+.utxo-store{display:grid;gap:14px}
+.utxo-store-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.utxo-store-head h2{margin:4px 0 5px;font:700 16px var(--display);color:#e9f2ed}
+.utxo-store-head p{margin:0;font-size:11px;line-height:1.55;color:#8c9a93;max-width:62ch}
+.utxo-store-search{display:flex;gap:8px}
+.utxo-store-search-field{flex:1;display:flex;align-items:center;gap:8px;height:37px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:#7d8b84}
+.utxo-store-search-field:focus-within{border-color:rgba(137,233,179,.45)}
+.utxo-store-search-field input{flex:1;border:0;background:transparent;color:#eef4f1;font-size:11px;outline:none}
+.utxo-store-search-field input::placeholder{color:#5f6d66}
+.utxo-store-summary{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:10px;color:#8c9a93}
+.utxo-store-summary b{color:#e9f2ed}
+.utxo-store-synced{margin-left:auto;color:#6f7d76}
+.utxo-type-chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 9px;font:600 9px var(--display);letter-spacing:.04em;border:1px solid transparent;white-space:nowrap}
+.utxo-type-chip.spendable{background:rgba(131,224,176,.11);border-color:rgba(131,224,176,.26);color:#9fe7c0}
+.utxo-type-chip.token{background:rgba(231,180,73,.11);border-color:rgba(231,180,73,.26);color:#edc67a}
+.utxo-type-chip.locked{background:rgba(120,150,220,.12);border-color:rgba(120,150,220,.26);color:#a8bdf0}
+.utxo-type-chip.spent{background:rgba(237,120,109,.1);border-color:rgba(237,120,109,.24);color:#ffb0a8}
+.utxo-type-chip.unverified{background:rgba(255,255,255,.05);border-color:var(--line);color:#98a6a0}
+.utxo-store-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:13px;background:rgba(9,14,15,.5)}
+.utxo-store-table{width:100%;border-collapse:collapse;font-size:10px}
+.utxo-store-table th{position:sticky;top:0;background:rgba(18,26,27,.96);text-align:left;font:700 8.5px var(--display);letter-spacing:.14em;color:#6f7d76;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.utxo-store-table td{padding:9px 12px;border-bottom:1px solid rgba(213,232,225,.05);color:#cdd9d2;white-space:nowrap}
+.utxo-store-table tbody tr:last-child td{border-bottom:0}
+.utxo-store-table tbody tr:hover td{background:rgba(131,224,176,.035)}
+.utxo-store-table td code{font:10px var(--mono);color:#a9b8b0}
+.utxo-store-table td.utxo-txid{width:1%}
+.utxo-txid-reference .explorer-reference-link{font:10px var(--mono);color:#a9b8b0;text-decoration-color:rgba(169,184,176,.3)}
+.utxo-txid-reference .explorer-reference-link:hover:not(:disabled){color:#cfe0d8}
+.utxo-txid-reference .explorer-reference-copy{width:20px;height:20px}
+.utxo-store-table td:nth-child(3){font:11px var(--mono);color:#e9f2ed}
+.utxo-store-empty{text-align:center;padding:26px 12px!important;color:#6f7d76!important;white-space:normal!important}
+.utxo-store-pager{display:flex;align-items:center;justify-content:center;gap:14px;font-size:10px;color:#8c9a93}
+.utxo-store-pager b{color:#e9f2ed}
+@media(max-width:760px){.utxo-store-head{flex-direction:column}.utxo-store-search{flex-direction:column}.utxo-store-synced{margin-left:0}}
+.wallet-address-full{overflow-wrap:anywhere;word-break:break-all}
+
+.balance-card-marks{display:flex;align-items:center;gap:14px}.address-qr{flex:none;border-radius:10px;overflow:hidden;background:#fff;display:block}.address-qr img{display:block}.receive-qr{margin:6px auto 12px}
+
+.token-name-line{display:flex;align-items:center;gap:8px}
+.token-decimals-badge{font-size:11px;font-weight:500;padding:1px 7px;border-radius:999px;background:rgba(127,127,127,.18);opacity:.8;white-space:nowrap}
+
+.balance-card-marks{flex-direction:column;gap:10px}
+.balance-card-marks .bsv-coin{order:-1}
+.address-qr{overflow:visible;padding:7px;border-radius:12px;box-shadow:0 0 0 1px rgba(215,235,224,.18)}
+.address-qr img{border-radius:0}
+
+.balance-card{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:32px;padding:30px 34px 26px;align-items:start}
+.balance-card-top{display:contents}
+.balance-card>.balance-divider,.balance-card>.wallet-address,.balance-card>.card-actions{grid-column:1/-1}
+.balance-head{grid-column:1;grid-row:1;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.balance-head .sync-badge{margin-top:0;padding:4px 10px;border-radius:999px;background:rgba(119,220,165,.08);border:1px solid rgba(119,220,165,.14);font-size:11px;white-space:nowrap}
+.balance-card .balance-number{grid-column:1;grid-row:2;margin-top:14px;font-size:50px;line-height:1.05;overflow-wrap:anywhere}
+.balance-card .balance-number span{margin-left:6px;font-size:18px}
+.balance-card .balance-usd{grid-column:1;grid-row:3;display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;font-size:12px;color:#9db1a5}
+.balance-chip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;background:rgba(216,238,224,.05);border:1px solid rgba(216,238,224,.09)}
+.balance-chip b{color:#e8f1ea;font-weight:600;font-variant-numeric:tabular-nums}
+.balance-chip b:after{content:' BSV';color:#84948b;font-weight:500}
+.chip-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.chip-dot.confirmed{background:#5fd39a}.chip-dot.pending{background:#e7b449}
+.balance-card-marks{grid-column:2;grid-row:1/4;align-self:center;display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 18px;border-radius:18px;background:rgba(216,238,224,.04);border:1px solid rgba(216,238,224,.09)}
+.balance-card-marks .bsv-coin{width:46px;height:46px}
+.balance-card-marks:after{content:'Scan to receive BSV';font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#84948b}
+.address-qr{padding:8px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.28)}
+.balance-card .balance-divider{margin:26px 0 18px}
+@media(max-width:720px){.balance-card{grid-template-columns:1fr;padding:22px 18px}.balance-card-marks{grid-column:1;grid-row:auto;margin-top:18px}.balance-card .balance-number{font-size:38px}}
+
+.receive-qr{margin:4px auto 14px;padding:9px;border-radius:14px}
+
+.address-qr{box-sizing:content-box;width:fit-content;line-height:0}
+.address-qr:empty{width:var(--qr-size,104px);min-height:104px}
+
+.balance-card-marks .bsv-coin{width:40px;height:40px;background:rgba(231,180,73,.1);border-color:rgba(231,180,73,.25)}
+.balance-card-marks .bsv-coin img{width:24px;height:24px;opacity:.95}
+.overview-sync-copy{max-width:560px}
+
+/* Review polish: security cards, file picker, API actions */
+.security-grid{align-items:stretch}
+.security-grid>.surface-card{height:100%}
+.security-row{align-items:center}
+.mint-form input[type=file]::file-selector-button{margin-right:12px;padding:7px 14px;border:1px solid rgba(95,211,184,.28);border-radius:9px;background:rgba(95,211,184,.1);color:#bdeede;font:inherit;font-weight:600;cursor:pointer;transition:background .15s}
+.mint-form input[type=file]::file-selector-button:hover{background:rgba(95,211,184,.2)}
+.api-actions button,.api-form .primary-button,.api-form .ghost-button{min-height:40px}
+/* Release polish: BSV brand colour, coin, avatars, mint fee, activity icons */
+:root{--bsv:#eab300}
+.bsv-ticker{color:var(--bsv);font-weight:inherit}
+.balance-number span.bsv-ticker,.balance-number .bsv-ticker{color:var(--bsv)}
+.amount-input span.bsv-ticker{color:var(--bsv);font-weight:700}
+.balance-card-marks .bsv-coin{width:46px;height:46px;padding:0;background:transparent;border:0;box-shadow:0 0 0 1px rgba(234,179,0,.35),0 6px 18px rgba(234,179,0,.18);overflow:hidden}
+.balance-card-marks .bsv-coin img,.balance-card-marks .bsv-coin .bsv-logo{width:100%;height:100%;padding:0;opacity:1;object-fit:cover;border-radius:50%}
+.mint-fee-line{display:flex;align-items:baseline;gap:10px;padding:12px 16px;border:1px solid rgba(234,179,0,.22);border-radius:12px;background:rgba(234,179,0,.06)}
+.mint-fee-line span:first-child{color:var(--muted);font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+.mint-fee-line b{font-size:16px;color:#f3f6f4}
+.mint-fee-line small{margin-left:auto;color:var(--muted);font-size:12px}
+.activity-row-icon.kind-chat{color:#7fd6ff;background:rgba(127,214,255,.1)}
+.activity-row-icon.kind-import{color:#83e0b0;background:rgba(131,224,176,.1)}
+.activity-row-icon.kind-mint{color:#eab300;background:rgba(234,179,0,.1)}
+.activity-row-icon.kind-lock{color:#c4a5ff;background:rgba(196,165,255,.1)}
+.activity-row-icon.kind-trade{color:#ffa86b;background:rgba(255,168,107,.1)}
