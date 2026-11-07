@@ -140,7 +140,7 @@ being reassuring.
 oversight:**
 
 - **Peer Chat is obfuscation, not secrecy — by design.** Its key is `sha256(ADMIN_DISCOVERY_ADDRESS)`, and that address is public in the source on purpose. The purpose is to keep a casual reader of the chain or an indexer from reading messages at a glance, while keeping the feed open to anyone running the wallet. The chat is **public by choice** — it is a community feed, not a private channel — and the app says so in the Peer Chat info popover ("so anyone can reverse it"), on the feature card ("Publicly reversible"), and in `SECURITY.md`.
-- **The wallet trusts one indexer.** Every network read and every broadcast goes to `bananablocks.com` (verified: it is the only external host referenced anywhere in `electron/`). The wallet never *trusts* that indexer for spend decisions — it verifies inclusion itself — but it does trust it for *availability* and for current unspent state.
+- **The wallet trusts one indexer.** Reads and broadcasts go to `bananablocks.com`. The only other hosts in `electron/` are GorillaPool ARC and WhatsOnChain, used solely for a hard-coded broadcast retry after a BananaBlocks ARC 461 rejection. The wallet never *trusts* that indexer for spend decisions — it verifies inclusion itself — but it does trust it for *availability* and for current unspent state.
 - **Single-signature, import-only.** There is no multisig, no hardware-wallet signing, no coin control, no recipient screening, and no auto-lock timer beyond the explicit Lock button.
 - **SPV proves inclusion, not unspentness.** The header chain proves a transaction is in a block. It does not prove an output is still unspent. The indexer remains the source of truth for that, and the wallet will not sign against an unknown or stale external spend status.
 
@@ -1096,13 +1096,15 @@ as that output is spent — whether it was spent by a cancellation, by a
 purchase, or by anything else. This is deliberately the conservative choice.
 An `OP_RETURN` claiming "this listing was cancelled" could be forged by
 anyone, so it must never be able to remove someone else's live order from
-the book. The cost is that a cancellation currently leaves **no announcement
-of its own** on the chain: the cancel transaction carries no `OP_RETURN` and
-pays no anchor to the discovery address, so a third-party indexer that only
-follows that address sees a listing appear and then silently disappear.
-That is a known gap, tracked as a future improvement, and it does not affect
-the wallet's own behaviour — the wallet finds the truth by checking the
-output, not by reading an announcement.
+the book. A cancellation **is** announced: the cancel transaction carries an
+`OP_RETURN` record (`op: "cancel"`) and pays a 10,000-satoshi indexing fee to
+the discovery address, so a third-party indexer following that address can see
+why a listing disappeared. The wallet only honours an announcement after
+verifying it against the chain (the transaction really spends the announced
+outpoint, pays the discovery address, and returns the exact tokens to the
+maker), and the UTXO check stays authoritative. Cancellations made by other
+software or older versions without an announcement still just look like a
+listing that disappears.
 
 **Known limitation:** a **hosted, off-chain** order book — such as
 LocalBSV's — is not reachable this way, because its orders are not linked to
@@ -1449,18 +1451,18 @@ These are real, current, and worth knowing before you rely on the wallet.
    cannot be reconstructed from the chain. LBSX-native peer trading is
    unaffected; live matching with an off-chain venue is not offered. See
    [`TRADING-PLAN.md`](./TRADING-PLAN.md).
-7. **Cancellations are not announced on-chain.** A cancel spends the listing's
-   `OrdLock` output and carries no `OP_RETURN` and no anchor of its own. The
-   wallet detects this correctly — it re-checks the locked output and drops
-   the listing once it is spent — but a third-party indexer following only the
-   discovery address sees a listing appear and then vanish with no on-chain
-   record of why. This is a gap in the announcement format, not in the
-   wallet's behaviour, and it is tracked as a future improvement.
+7. **Cancellation announcements are advisory.** A cancel publishes an
+   `OP_RETURN` record and a 10,000-satoshi indexing fee to the discovery
+   address, but the wallet treats the spent `OrdLock` output as the source of
+   truth, not the announcement. Cancellations made by other software or older
+   versions without an announcement still appear to an indexer as a listing
+   that silently disappears.
 8. **The installer is unsigned.** Windows SmartScreen will warn on first run.
 9. **Windows is the only supported platform today.** The code is
    cross-platform in principle; the packaging and the OS key-store behaviour
    are not yet verified elsewhere.
-10. **No hardware-wallet, multi-sig, or coin-control support.**
+10. **No hardware-wallet, multi-sig, or manual coin-control support.** The
+    UTXO Store tab labels outputs but is read-only.
 11. **The indexer sees your addresses.** There is no privacy layer.
 12. **No key generation.** LBSX cannot create a wallet for you; you must
     already hold a BIP39 phrase. This is a deliberate

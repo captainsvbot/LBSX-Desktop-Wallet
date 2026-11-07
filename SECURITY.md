@@ -19,7 +19,7 @@ Please include:
 
 - A description of the issue and its impact.
 - Steps to reproduce, ideally with a test script.
-- The wallet build version (`v2.0.02` / package version `2.0.2`) and platform.
+- The wallet build version (for example `v2.1.00`) and platform.
 - Whether the issue requires a real wallet, a funded wallet, or only a
   synthetic one.
 
@@ -115,8 +115,8 @@ Because these caps are per IP, and because an LBSX installation holds
 exactly **one wallet** behind **one** connection, separate wallets do not
 contend with one another. A user who deliberately runs several wallets
 behind a single NAT or carrier-grade NAT does share a bucket and is capped
-together — and that is what the **configurable RPC provider fallback**
-exists to solve, since a user-supplied node has no per-IP ceiling at all. An
+together. A configurable provider fallback that could relieve this is planned
+(issue #2) but is **not implemented yet**. An
 attacker who can force a user behind a shared IP cannot steal the user's
 funds or read the vault, but can slow that user's ability to broadcast
 while the wallet is in use.
@@ -218,35 +218,36 @@ the README's Known limitations.
 
 - No multi-signature support.
 - No hardware wallet or cold-storage signing.
-- No coin control, UTXO labelling, or allowlists.
+- No manual coin control and no recipient allowlists. Inputs are chosen
+  automatically from verified outputs. The **UTXO Store** tab labels every
+  saved output (`Spendable BSV`, `Token`, `Locked`, `Spent`, `Unverified`),
+  but it is a read-only view: you cannot pick or freeze outputs from it.
 - No recipient screening, sanctions filtering, or policy engine.
 - No auto-lock timer or idle timeout beyond the explicit Lock button and
   `before-quit`.
 - The wallet is import-only: it never generates a recovery phrase.
 
-### 9. Order cancellations are not announced on-chain
+### 9. Order cancellations are announced on-chain, but the announcement is advisory
 
-A cancellation spends the listing's `OrdLock` output. It carries **no
-`OP_RETURN` record and no anchor payment** to the discovery address, so a
-third-party indexer that follows only that address cannot distinguish a
-cancellation from any other spend of the locked output.
+A cancellation spends the listing's `OrdLock` output **and** carries an
+`OP_RETURN` record (`op: "cancel"`, the token, amount, maker and the cancelled
+outpoint) plus a 10,000-satoshi indexing payment to the discovery address, so
+a third-party indexer that follows only that address can see why a listing
+disappeared.
 
-This is a gap in the **announcement format**, not in the wallet's security
-model, and it is deliberately handled in a conservative way:
+The announcement is deliberately **advisory, not authoritative**:
 
-- **The wallet does not rely on an announcement to decide liveness.** It
-  re-checks the locked output against the indexer and treats a spent output
-  as "no longer a live listing". This is the correct direction, because an
-  `OP_RETURN` claiming "cancelled" can be forged by anyone — so an
-  announcement must never be able to remove another party's live order from
-  the order book.
-- **The cost** is that a third-party indexer sees a listing appear and then
-  silently disappear, with no on-chain record of the reason. Adding a cancel
-  announcement is tracked as a future improvement.
-
-Adding one would need care: the announcement must remain *advisory*, and the
-spend-based UTXO check must remain authoritative, or a third party could
-suppress a live listing by broadcasting a forged cancel record.
+- **The wallet does not rely on an announcement alone to decide liveness.**
+  A cancel record is only honoured after the wallet verifies it against the
+  chain (a confirmed transaction that really spends the announced outpoint,
+  pays the discovery address, and returns the exact tokens to the stated
+  maker). A spent
+  `OrdLock` output is always treated as "no longer a live listing". This is
+  the correct direction, because an `OP_RETURN` claiming "cancelled" could
+  otherwise be forged by anyone to suppress another party's live order.
+- **The remaining gap** is for cancellations made by other software or by
+  older wallet versions that did not publish an announcement: those still
+  appear to an indexer as a listing that silently disappears.
 
 ### 10. Each wallet is its own infrastructure
 
@@ -274,25 +275,17 @@ deliberate:
   one another's request allowance, and one user syncing hard cannot exhaust
   another user's budget. The only shared bucket is the one an account owner
   creates deliberately by sharing their own API key or by running several
-  wallets behind one NAT — and the latter is a limit the configurable RPC
-  fallback removes, since a user-supplied node has no per-IP cap. This holds
-  for **broadcast** as well as reads, because the fallback broadcasts
-  through `sendrawtransaction` rather than through the metered API.
-- **No single-provider dependency.** Chain access goes through a **provider
-  chain**, not one hard-coded host: the primary indexer is tried first, and
-  the wallet fails over automatically to a configurable BSV RPC node —
-  default `https://bsv-rpc.publicnode.com`, and fully user-configurable so
-  a user can point it at their own node — on failure, rate-limit
-  exhaustion, or timeout. **Broadcast fails over on the same chain**, via
-  the node's `sendrawtransaction`, so a transaction the primary provider
-  refuses is retried rather than left unsent; the wallet's
-  `broadcast-uncertain` state still applies, so a broadcaster that accepts
-  a transaction and then times out is never reported as a rejection. A
-  provider outage degrades the wallet to its encrypted cache rather than
-  taking it offline. Crucially, **a provider is a source of data, never a
-  source of trust**: headers are still validated for proof of work,
-  difficulty, linkage, median time past, and tip, and transactions are still
-  verified against the local SPV chain, whichever provider answered.
+  wallets behind one NAT. A configurable fallback provider that could relieve
+  that is planned (issue #2) but is **not implemented yet**.
+- **Single provider today.** Reads and broadcasts go through BananaBlocks. A
+  configurable fallback is planned in
+  [issue #2](https://github.com/captainsvbot/LBSX-Desktop-Wallet/issues/2) and
+  is not implemented. The one exception is a hard-coded broadcast retry through
+  GorillaPool ARC and WhatsOnChain when BananaBlocks rejects a transaction with
+  an ARC 461 script error. Regardless of provider, **a provider is a source of
+  data, never a source of trust**: headers are still validated for proof of
+  work, difficulty, linkage, median time past, and tip, and transactions are
+  still verified against the local SPV chain.
 - **No auto-update channel.** `publish` is `null` in the build
   configuration and there is no `electron-updater` dependency, so the wallet
   cannot be silently updated — including by a compromised or coerced
@@ -300,11 +293,10 @@ deliberate:
   build, which is a conscious act. This is also why a build is not signed:
   see the README's known limitations.
 - **No phone-home of any kind.** The dependency list contains no analytics,
-  tracking, or crash-reporting SDK. The only external hosts the wallet
-  contacts are public chain providers — the primary indexer and the
-  configurable fallback RPC node — and only for data the user asked it to
-  fetch. The API key is attached only for the primary provider's own host
-  and is never sent to a user-supplied RPC endpoint.
+  tracking, or crash-reporting SDK. The wallet contacts BananaBlocks (and, only
+  for the narrow ARC 461 broadcast retry, GorillaPool ARC and WhatsOnChain), and
+  only for data the user asked it to fetch or a transaction the user signed.
+  The API key is attached only to BananaBlocks requests.
 - **No inbound surface.** The Electron main process opens no listening
   socket, so the wallet cannot be reached by another machine on the local
   network, and there is no remote-control or RPC channel into a running
