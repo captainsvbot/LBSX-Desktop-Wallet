@@ -242,9 +242,14 @@ The announcement is deliberately **advisory, not authoritative**:
   chain (a confirmed transaction that really spends the announced outpoint,
   pays the discovery address, and returns the exact tokens to the stated
   maker). A spent
-  `OrdLock` output is always treated as "no longer a live listing". This is
-  the correct direction, because an `OP_RETURN` claiming "cancelled" could
-  otherwise be forged by anyone to suppress another party's live order.
+  `OrdLock` output is always treated as "no longer a live listing". Only a
+  party who can unlock the listing's `OrdLock` — the seller, or a buyer
+  exercising the purchase path — can produce such a transaction, so a forged
+  cancel against someone else's live listing is **not possible**. The
+  `maker` field is self-declared and not cross-checked against the original
+  listing's seller; that is cosmetic (any valid cancel tx provably spent the
+  lock) and matters only to third-party tools that read announcements
+  without re-checking spends.
 - **The remaining gap** is for cancellations made by other software or by
   older wallet versions that did not publish an announcement: those still
   appear to an indexer as a listing that silently disappears.
