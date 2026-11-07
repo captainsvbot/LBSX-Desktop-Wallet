@@ -85,6 +85,66 @@ Fees are not refundable. Check the review screen for the exact amounts.
 
 ---
 
+## How it works
+
+```
+Renderer (src/*.jsx, React UI)     never sees the phrase or private key
+        │  contextBridge (electron/preload.cjs), allow-listed API
+Main process (electron/*.cjs)      vault · wallet-data · spv · token-wallet
+        │                          chain · market · trading · peer-chat
+        │  HTTPS
+BananaBlocks                       balances, tokens, UTXOs, history, broadcast
+```
+
+The UI runs in a sandboxed renderer and only receives your public address and a
+wallet summary. Key handling, signing, and network access happen in the Electron
+main process.
+
+| File | Responsibility |
+|---|---|
+| `vault.cjs` | Import, unlock, lock, delete, key derivation |
+| `wallet-data.cjs` | Encrypted per-wallet state on disk |
+| `spv.cjs` | Block header chain and Merkle proof (BEEF) verification |
+| `chain.cjs` | Balance, token, UTXO and activity sync |
+| `token-wallet.cjs` | BSV / BSV-21 send, mint, lock, claim, broadcast |
+| `market.cjs`, `trading.cjs` | Listings, buying, discovery of peer orders |
+| `peer-chat.cjs` | Parses on-chain chat messages |
+| `transaction-tracker.cjs` | Saves a transaction locally before broadcasting |
+| `bananablocks.cjs` | API key storage and authenticated requests |
+
+### Balance sync
+
+1. Fetch the BSV balance, token list and unspent outputs from BananaBlocks
+   (unspent outputs are read page by page, so large wallets are read in full,
+   within BananaBlocks' rate limits).
+2. Store the unspent list as **observed**: a hint, not spendable funds.
+3. For each candidate output, fetch the parent transaction's proof and check it
+   against the locally validated header chain (proof of work, linkage, Merkle
+   proof) and confirm the script and value match.
+4. Only outputs that pass are marked **verified** and can be spent. They are
+   cached in the encrypted wallet file.
+
+Each section (BSV, tokens, UTXOs) records its own error, so a token outage does
+not erase your BSV balance. Verification checks that a transaction is in the
+chain; it cannot prove an output is unspent, so BananaBlocks is still trusted
+for spend state.
+
+### What is stored on your computer
+
+Everything lives in the Electron user data folder (`%APPDATA%\lbsx-desktop-wallet`
+for dev builds, or the installed app's folder), never in the install directory.
+
+| File | Contents | Protection |
+|---|---|---|
+| `wallet-vault.json` | Recovery phrase | Vault password (scrypt, AES-256-GCM) or OS key store (`safeStorage`) |
+| `wallet-data\<hash>.enc` | Verified UTXOs, proofs, activity, locks | AES-256-GCM, key derived from the wallet seed, readable only while unlocked |
+| `bananablocks-api-key.json` | Optional API key | `safeStorage` |
+| `spv\mainnet.headers` | Cached block headers | Public data, unencrypted |
+
+**Delete Wallet** removes the vault and local data. It never touches funds.
+
+---
+
 ## How your keys are handled
 
 - Your recovery phrase is **encrypted on disk** and decrypted in memory only
