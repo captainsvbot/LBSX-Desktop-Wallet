@@ -60,6 +60,7 @@ no keys, and no build artifacts** — see
 - [Feature deep dives](#feature-deep-dives)
 - [Download and install](#download-and-install)
 - [Generating a recovery phrase safely](#generating-a-recovery-phrase-safely)
+- [Pasting values into the wallet](#pasting-values-into-the-wallet)
 - [BananaBlocks API key](#bananablocks-api-key)
 - [Fees](#fees)
 - [Development](#development)
@@ -1259,6 +1260,22 @@ create and store a phrase.
 
 This is general guidance, not a guarantee. You are responsible for your phrase;
 see the [Disclaimer](#disclaimer-no-warranty-no-liability).
+
+---
+
+## Pasting values into the wallet
+
+When the wallet asks for a long value — a recipient BSV address when sending,
+a BSV-21 token ID when importing a token, the recovery phrase when importing a
+wallet, or your BananaBlocks API key — copy it at the source instead of typing
+it by hand. Click the input field so the cursor is inside it, then press
+**[Ctrl] + [V]** on the keyboard to paste it in. On Windows you can also
+right-click the field and choose **Paste**.
+
+Pasting matters: addresses and token IDs are long enough that one mistyped
+character sends funds to the wrong place, and there is no undo. The wallet
+never reads your clipboard on its own; it only uses what you paste into a
+field yourself.
 
 ---
 
