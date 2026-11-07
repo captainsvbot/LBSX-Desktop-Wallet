@@ -39,7 +39,20 @@ const detailsByTxid = new Map([
     outputs: [{ index: 0, value: '0', script_pubkey: script.toHex() }],
   }],
 ]);
-const requests = { history: 0, pendingHistory: 0, details: 0, rawHex: 0, beef: 0 };
+const bulkRowByTxid = new Map([
+  [confirmedTxid, {
+    txid: confirmedTxid,
+    blockheight: 900001,
+    blocktime: 1700000000,
+    vin: [],
+    vout: [{
+      n: 0,
+      value: '0.00000001',
+      scriptPubKey: { hex: script.toHex(), addresses: [adminAddress] },
+    }],
+  }],
+]);
+const requests = { history: 0, pendingHistory: 0, summary: 0, bulk: 0, details: 0, rawHex: 0, beef: 0 };
 let stored = {
   transactions: [],
   pendingTransactions: [],
@@ -53,31 +66,47 @@ function response(body, headers = {}) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...headers } });
 }
 
+function handleRequest(input, init = {}) {
+  const url = new URL(String(input));
+  const path = url.pathname;
+  const method = (init.method || 'GET').toUpperCase();
+  if (path.endsWith('/unconfirmed/history')) {
+    requests.pendingHistory++;
+    return response({ result: [{ tx_hash: pendingTxid }] });
+  }
+  if (path.endsWith('/history')) {
+    requests.history++;
+    return response([{ tx_hash: confirmedTxid, height: 900001 }], { 'X-Has-More': 'false' });
+  }
+  if (path === '/api/v1/bsv/main/txs') {
+    assert.equal(method, 'POST', 'history is screened with a bulk POST request');
+    requests.bulk++;
+    const body = JSON.parse(init.body || '{}');
+    const txids = Array.isArray(body.txids) ? body.txids : [];
+    assert(txids.length > 0 && txids.length <= 20, 'a bulk request carries at most 20 txids');
+    return response(txids.map(txid => bulkRowByTxid.get(txid) || { txid, error: 'not found' }));
+  }
+  if (path === `/api/v1/address/${adminAddress}`) {
+    requests.summary++;
+    return response({ tx_count: 1, utxo_count: 1, balance: 1 });
+  }
+  if (path.startsWith('/api/v1/tx/') && path.endsWith('/hex')) {
+    requests.rawHex++;
+    return new Response(pendingRawHex, { status: 200, headers: { 'Content-Type': 'text/plain' } });
+  }
+  if (path.startsWith('/api/v1/tx/')) {
+    requests.details++;
+    const txid = path.split('/').at(-1);
+    return response(detailsByTxid.get(txid));
+  }
+  throw new Error(`Unexpected admin-wallet index URL ${path}`);
+}
+
 const originalLoad = Module._load;
 Module._load = function(request, parent, isMain) {
-  if (request === './bananablocks.cjs') {
+  if (request === './chain.cjs') {
     return {
-      bananaBlocksFetch: async input => {
-        const url = new URL(String(input));
-        if (url.pathname.endsWith('/unconfirmed/history')) {
-          requests.pendingHistory++;
-          return response({ result: [{ tx_hash: pendingTxid }] });
-        }
-        if (url.pathname.endsWith('/history')) {
-          requests.history++;
-          return response([{ tx_hash: confirmedTxid, height: 900001 }], { 'X-Has-More': 'false' });
-        }
-        if (url.pathname.startsWith('/api/v1/tx/') && !url.pathname.endsWith('/hex')) {
-          requests.details++;
-          const txid = url.pathname.split('/').at(-1);
-          return response(detailsByTxid.get(txid));
-        }
-        if (url.pathname === `/api/v1/tx/${pendingTxid}/hex`) {
-          requests.rawHex++;
-          return new Response(pendingRawHex, { status: 200, headers: { 'Content-Type': 'text/plain' } });
-        }
-        throw new Error(`Unexpected admin-wallet index URL ${url}`);
-      },
+      requestBananaBlocks: async (url, attempt, init = {}) => handleRequest(url, init),
     };
   }
   if (request === './constants.cjs') return { ADMIN_DISCOVERY_ADDRESS: adminAddress };
@@ -119,11 +148,18 @@ assert(pending, 'the shared index includes an unconfirmed sell announcement');
 assert.equal(pending.blockHeight, 0);
 assert.equal(pending.confirmed, false);
 assert.equal(pending.rawTxHex, pendingRawHex, 'pending protocol transaction bytes are cached for local discovery');
-assert.deepEqual(requests, { history: 1, pendingHistory: 1, details: 2, rawHex: 1, beef: 1 });
+assert.deepEqual(requests, { history: 1, pendingHistory: 1, summary: 1, bulk: 1, details: 2, rawHex: 1, beef: 1 },
+  'history is screened with one bulk request instead of one request per transaction');
+assert.equal(first.status.complete, true, 'the scan reports itself complete');
+assert.equal(first.status.rateLimited, false, 'a healthy scan is not reported as rate limited');
+assert.equal(first.status.checked, 1);
+assert.equal(first.status.total, 1);
+assert.equal(first.status.candidates, 1, 'the sell announcement is detected as a protocol candidate');
+assert.deepEqual(first.errors, [], 'a healthy scan reports no errors');
 
 const cached = await getAdminWalletIndex(walletAddress);
 assert.equal(cached.transactions.find(row => row.txid === pendingTxid)?.rawTxHex, pendingRawHex);
 await syncAdminWalletIndex(walletAddress);
-assert.deepEqual(requests, { history: 1, pendingHistory: 1, details: 2, rawHex: 1, beef: 1 },
+assert.deepEqual(requests, { history: 1, pendingHistory: 1, summary: 1, bulk: 1, details: 2, rawHex: 1, beef: 1 },
   're-reading the shared index does not repeat history or transaction lookups');
-console.log('PASS: shared admin index caches confirmed BEEF and pending sell records without repeated lookups or false SPV claims');
+console.log('PASS: shared admin index bulk-screens history, caches confirmed BEEF and pending sell records without repeated lookups or false SPV claims');

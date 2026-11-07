@@ -1,6 +1,6 @@
 {
   "name": "lbsx-desktop-wallet",
-  "version": "1.2.1",
+  "version": "2.1.00",
   "private": true,
   "type": "module",
   "description": "Local-first BSV and BSV-21 desktop wallet with SPV validation and on-chain trading",
@@ -35,6 +35,7 @@
     "test:peer-chat": "node scripts/peer-chat-smoke.mjs",
     "test:discovery": "node scripts/trading-discovery-smoke.mjs",
     "test:spv": "node scripts/spv-smoke.mjs",
+    "test:unspent-scan": "node scripts/unspent-scan-smoke.mjs",
     "test:explorer": "node scripts/explorer-reference-smoke.cjs",
     "test:bananablocks-key": "node scripts/bananablocks-api-key-smoke.mjs",
     "test:wallet-data": "node scripts/wallet-data-smoke.mjs",
@@ -72,7 +73,7 @@
       "package.json"
     ],
     "directories": {
-      "output": "release-windows-1.2.1"
+      "output": "release-windows-2.1.00"
     },
     "asar": true,
     "win": {
@@ -87,7 +88,7 @@
       ]
     },
     "nsis": {
-      "artifactName": "${productName} Setup ${version}.${ext}",
+      "artifactName": "${productName} Setup 2.1.00.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

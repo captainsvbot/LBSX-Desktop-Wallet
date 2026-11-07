@@ -26,3 +26,6 @@
 .mint-success dd{margin:0;font-size:10px;color:#dce7df;overflow-wrap:anywhere}
 .mint-success code{font:9px var(--mono);color:#afd8bd}
 @media(max-width:600px){.mint-tool-card{padding:17px}.mint-form-grid{grid-template-columns:1fr}.mint-form .mint-image-label{grid-column:auto}.mint-review-actions{justify-content:stretch}.mint-review-actions button{flex:1}}
+
+.mint-field-hint{display:block;margin-top:6px;font-size:12px;opacity:.7}
+.mint-field-error{color:#ff6b6b;opacity:1}

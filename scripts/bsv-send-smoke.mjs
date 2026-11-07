@@ -26,6 +26,7 @@ Module._load = function(request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain);
 };
 const { sendBsv } = require('../electron/token-wallet.cjs');
+const { ADMIN_DISCOVERY_ADDRESS } = require('../electron/constants.cjs');
 const tokenWallet = require('../electron/token-wallet.cjs');
 Module._load = originalLoad;
 
@@ -87,7 +88,16 @@ assert.equal(tx.inputs[0].prevTxId.toString('hex'), cashTxid);
 const recipientScript = bsv.Script.buildPublicKeyHashOut(recipient).toHex();
 assert(tx.outputs.some(output => output.script.toHex() === recipientScript && output.satoshis === 10000), 'recipient receives exact satoshi amount');
 assert(tx.outputs.some(output => output.script.toHex() === bsv.Script.buildPublicKeyHashOut(address).toHex() && output.satoshis > 1), 'remaining BSV returns as wallet change');
-assert(tx.outputs.some(output => output.script.toHex().startsWith('006a')), 'optional note is encoded in OP_RETURN');
+assert(tx.outputs.some(output => output.script.toHex() === bsv.Script.buildPublicKeyHashOut(ADMIN_DISCOVERY_ADDRESS).toHex() && output.satoshis === 10000), 'admin wallet receives the 10000 sat service fee');
+const memoOutput = tx.outputs.find(output => output.script.toHex().startsWith('006a'));
+assert(memoOutput, 'LBSX OP_RETURN is present');
+const memoFields = memoOutput.script.chunks.slice(2).map(chunk => chunk.buf?.toString('utf8'));
+assert.deepEqual(memoFields.slice(0, 3), ['LBSX', 'v2', 'bsv_send']);
+assert.equal(memoFields[4], recipient);
+assert.equal(memoFields[5], '10000');
+assert.equal(memoFields[7], 'service_fee:10000sat:wallet_maintenance');
+assert.equal(memoFields[8], 'msg:test payment');
+assert.equal(memoOutput.satoshis, 0);
 assert(tx.inputs[0].script.chunks.length >= 2, 'cash input is locally signed');
 console.log('PASS: BSV send signs and broadcasts exact amount, excludes token carrier, returns change, and carries optional public note');
 

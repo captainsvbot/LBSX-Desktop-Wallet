@@ -9,9 +9,9 @@ const spvTestMock = require('./spv-test-mock.cjs');
 const sdk = require('@bsv/sdk');
 const { Transaction, P2PKH } = sdk;
 const ADMIN_DISCOVERY_ADDRESS = '15BYCBgXi2GWXEvJNJJGfcYxeN9nQqp7eB';
-const key = bsv.PrivateKey.fromBuffer(Buffer.alloc(32, 7));
+const key = new bsv.PrivateKey(bsv.PrivateKey.fromBuffer(Buffer.alloc(32, 7)).bn, undefined, true);
 const address = key.toAddress().toString();
-const buyerKey = bsv.PrivateKey.fromBuffer(Buffer.alloc(32, 9));
+const buyerKey = new bsv.PrivateKey(bsv.PrivateKey.fromBuffer(Buffer.alloc(32, 9)).bn, undefined, true);
 const buyerAddress = buyerKey.toAddress().toString();
 const tokenId = '9421c95ba7b6ffb518eae62b9c5b1650d28aacdc420a98f2abf25668c048c60d_0';
 const txStore = new Map();
@@ -22,6 +22,7 @@ const localWalletTransactions = [];
 const feeRowsByAddress = new Map([[address, []], [buyerAddress, []]]);
 const feeAddressByOutpoint = new Map();
 const cachedUtxosByAddress = new Map();
+const observedUtxosByAddress = new Map();
 const unspentRequestsByAddress = new Map();
 let currentToken = null;
 let activeListing = null;
@@ -133,7 +134,10 @@ Module._load = function(request, parent, isMain) {
     cacheVerifiedTokenUtxos: async () => {},
     cacheVerifiedTokenUtxo: async () => {},
     getSpendableBsvUtxos: async owner => cachedUtxosByAddress.get(owner) || [],
-    getWalletData: async owner => ({ transactions: localWalletTransactions.filter(row => row.address === owner) }),
+    getWalletData: async owner => ({
+      transactions: localWalletTransactions.filter(row => row.address === owner),
+      observedBsvUtxos: observedUtxosByAddress.get(owner) || [],
+    }),
     getSpendableTokenUtxos: async () => [],
     getSpendableUtxoBlocklist: async () => new Set(),
     getTrackedTransactionHex: async () => null,
@@ -185,7 +189,7 @@ assert.match(listed.txid, /^[0-9a-f]{64}$/);
 assert.equal(listed.amountBase, '500');
 const listedTx = txStore.get(listed.txid);
 const adminAnchor = listedTx.outputs.find(output => output.lockingScript.toHex() === p2pkh.lock(ADMIN_DISCOVERY_ADDRESS).toHex());
-assert.equal(adminAnchor?.satoshis, 1, 'listing should include a 1-sat admin-wallet discovery anchor');
+assert.equal(adminAnchor?.satoshis, 10000, 'listing should include the 10,000-sat admin-wallet discovery fee');
 const announcementOutput = listedTx.outputs.find(output => output.lockingScript.toHex().startsWith('006a'));
 assert(announcementOutput, 'listing should carry an OP_RETURN discovery record');
 assert.equal(announcementOutput.satoshis, 0, 'OP_RETURN must remain a zero-satoshi output after fee calculation');
@@ -241,22 +245,46 @@ assert.equal(partialListing.changeOutpoint, `${partialListing.txid}.1`);
 await market.buildAndBroadcastCancel(key, { tokenId, outpoint: partialListing.outpoint });
 console.log('PASS: partial listing locks the requested amount and returns exact BSV-21 change');
 
-const listedAgain = await market.buildAndBroadcastList(key, { tokenId, amountBase: currentToken.amount.toString(), priceSats: 6000 });
+const listedAgain = await market.buildAndBroadcastList(key, { tokenId, amountBase: currentToken.amount.toString(), priceSats: 1000 });
 confirmedAdminTxIds.add(listedAgain.txid);
-const pendingBuyerCash = makeSource({ lockingScript: p2pkh.lock(buyerAddress), satoshis: 50000 });
-cachedUtxosByAddress.set(buyerAddress, [{
-  txid: pendingBuyerCash.id('hex').toLowerCase(),
+const trackedChange = makeSource({ lockingScript: p2pkh.lock(buyerAddress), satoshis: 67248 });
+const trackedFeeCash = makeSource({ lockingScript: p2pkh.lock(buyerAddress), satoshis: 50000 });
+for (const row of feeRowsByAddress.get(buyerAddress)) spentOutpoints.add(`${row.tx_hash}.${row.tx_pos}`);
+for (const tx of [trackedChange, trackedFeeCash]) {
+  feeAddressByOutpoint.set(`${tx.id('hex').toLowerCase()}.0`, buyerAddress);
+}
+cachedUtxosByAddress.set(buyerAddress, []);
+observedUtxosByAddress.set(buyerAddress, [trackedChange, trackedFeeCash].map(tx => ({
+  txid: tx.id('hex').toLowerCase(),
   vout: 0,
-  satoshis: 50000,
-  scriptHex: p2pkh.lock(buyerAddress).toHex(),
-  rawTxHex: pendingBuyerCash.toHex(),
-  state: 'pending',
-}]);
+  satoshis: tx.outputs[0].satoshis,
+  height: 900000,
+})));
 const buyerUnspentRequestsBeforeBuy = unspentRequestsByAddress.get(buyerAddress) || 0;
 const bought = await market.buildAndBroadcastBuy(buyerKey, { tokenId, outpoint: listedAgain.outpoint });
 assert.match(bought.txid, /^[0-9a-f]{64}$/);
 assert.equal(bought.amountBase, currentToken.amount.toString());
-assert.equal(unspentRequestsByAddress.get(buyerAddress) || 0, buyerUnspentRequestsBeforeBuy, 'an accepted local pending BSV output should fund the purchase without a BananaBlocks UTXO request');
+const boughtTx = txStore.get(bought.txid);
+assert(boughtTx.inputs.some(input => `${input.sourceTXID}.${input.sourceOutputIndex}` === `${trackedChange.id('hex').toLowerCase()}.0`),
+  'buy should use a verified UTXO Store change output when the indexer unspent list omits it');
+const buyerAdminOutputs = boughtTx.outputs.filter(output => output.lockingScript.toHex() === p2pkh.lock(ADMIN_DISCOVERY_ADDRESS).toHex());
+assert.equal(buyerAdminOutputs.length, 1, 'buy fees should be combined into one admin output');
+assert.equal(buyerAdminOutputs[0].satoshis, 10010, 'buy should pay 1% of the 1,000-sat listing price plus the 10,000-sat service fee');
+const buyAnnouncementOutput = boughtTx.outputs.find(output => output.lockingScript.toHex().startsWith('006a'));
+assert(buyAnnouncementOutput, 'buy should carry an OP_RETURN discovery record');
+assert.equal(buyAnnouncementOutput.satoshis, 0, 'buy OP_RETURN must remain a zero-satoshi output');
+const buyAnnouncementBytes = Buffer.from(buyAnnouncementOutput.lockingScript.toHex(), 'hex');
+let buyPushLength;
+let buyPayloadOffset;
+if (buyAnnouncementBytes[2] === 0x4d) { buyPushLength = buyAnnouncementBytes.readUInt16LE(3); buyPayloadOffset = 5; }
+else if (buyAnnouncementBytes[2] === 0x4c) { buyPushLength = buyAnnouncementBytes[3]; buyPayloadOffset = 4; }
+else { buyPushLength = buyAnnouncementBytes[2]; buyPayloadOffset = 3; }
+const buyAnnouncement = JSON.parse(buyAnnouncementBytes.subarray(buyPayloadOffset, buyPayloadOffset + buyPushLength).toString('utf8'));
+assert.deepEqual(buyAnnouncement, {
+  p: 'lbsx', v: 1, op: 'buy', net: 'main', id: tokenId, amt: currentToken.amount.toString(), price: 1000,
+  buyer: buyerAddress, src: listedAgain.outpoint, receive: 2, anchor: ADMIN_DISCOVERY_ADDRESS,
+});
+assert.equal(unspentRequestsByAddress.get(buyerAddress) || 0, buyerUnspentRequestsBeforeBuy + 1, 'buy should fall back to tracked UTXOs when the indexer unspent list omits them');
 assert.equal((await market.getTokenOrderBook(tokenId, address)).asks.length, 0);
 assert.equal(broadcastCount, 6);
-console.log('PASS: buy validates the active listing, creates the buyer BSV-21 delivery, and spends accepted local pending BSV without an unspent query');
+console.log('PASS: buy validates the active listing and verifies UTXO Store change outputs when BananaBlocks omits them');

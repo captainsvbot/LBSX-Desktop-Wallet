@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownUp, BadgeCheck, Loader2, Plus, RefreshCw, ShoppingCart, Tag, X } from 'lucide-react';
 import BsvLogo from './BsvLogo.jsx';
+import BsvText from './BsvText.jsx';
 import TokenIcon from './TokenIcon.jsx';
 import ExplorerReference from './ExplorerReference.jsx';
 
@@ -15,6 +16,19 @@ const formatUnits = (raw, decimals = 0) => {
 };
 
 const satsToBsv = sats => (Number(sats || 0) / 100000000).toFixed(8);
+const BUY_SERVICE_FEE_SATS = 10000n;
+const buyPlatformFeeSats = sats => {
+  const price = BigInt(sats || 0);
+  return price > 0n ? (price + 99n) / 100n : 1n;
+};
+const formatSats = raw => {
+  try {
+    const amount = BigInt(raw ?? '0');
+    const whole = amount / 100000000n;
+    const fraction = (amount % 100000000n).toString().padStart(8, '0').replace(/0+$/, '');
+    return fraction ? `${whole.toLocaleString('en-US')}.${fraction}` : whole.toLocaleString('en-US');
+  } catch { return '—'; }
+};
 const shortOutpoint = outpoint => outpoint ? `${outpoint.slice(0, 10)}…${outpoint.slice(-5)}` : '—';
 
 function priceToSats(value) {
@@ -95,16 +109,29 @@ export default function TradingPage({ tokens = [], bsvBalance, address, onSyncAs
   const selected = usableTokens.find(token => token.tokenId === tokenId);
   const decimals = Math.min(18, Math.max(0, Number(selected?.decimals || 0)));
   const confirmedSats = /^\d+$/.test(String(bsvBalance?.confirmed ?? '')) ? BigInt(bsvBalance.confirmed) : null;
-  const pendingSats = /^-?\d+$/.test(String(bsvBalance?.unconfirmed ?? '')) ? BigInt(bsvBalance.unconfirmed) : null;
+  const unconfirmedSats = /^-?\d+$/.test(String(bsvBalance?.unconfirmed ?? '')) ? BigInt(bsvBalance.unconfirmed) : null;
   const trackedSpendableSats = /^\d+$/.test(String(bsvBalance?.spendableBsvSats ?? '')) ? BigInt(bsvBalance.spendableBsvSats) : null;
-  const localPendingSats = /^\d+$/.test(String(bsvBalance?.pendingLocalBsvSats ?? '')) ? BigInt(bsvBalance.pendingLocalBsvSats) : 0n;
-  const feeAvailableSats = confirmedSats === null ? trackedSpendableSats : trackedSpendableSats === null || confirmedSats >= trackedSpendableSats ? confirmedSats : trackedSpendableSats;
+  // The chain can report a negative mempool delta; pending balance never shows as a credit.
+  const pendingSats = unconfirmedSats === null ? null : unconfirmedSats > 0n ? unconfirmedSats : 0n;
+  // Displayed balance mirrors the Overview tile: confirmed plus pending, never a negative pending.
+  // The tracked 0-conf change is not added on top of the confirmed balance; it double counts inputs the
+  // pending transaction already spends, which is what made the old tile read higher than the chain balance.
+  const availableSats = confirmedSats === null ? trackedSpendableSats : confirmedSats + (pendingSats ?? 0n);
+  // Fee/affordability checks keep the Send page rule: confirmed balance or locally tracked 0-conf change, whichever is larger.
+  const spendableSats = confirmedSats === null
+    ? trackedSpendableSats
+    : trackedSpendableSats === null
+      ? confirmedSats
+      : (trackedSpendableSats > confirmedSats ? trackedSpendableSats : confirmedSats);
   const tokenBalanceBase = /^\d+$/.test(String(selected?.balance ?? '')) ? selected.balance : null;
   const orders = orderBook?.asks || [];
   const ownOrders = orderBook?.myOrders || [];
   const listingPriceSats = priceToSats(price);
   const bestAsk = orders[0];
-  const canCoverBestAsk = feeAvailableSats === null || !bestAsk || feeAvailableSats >= BigInt(bestAsk.priceSats) + 4000n;
+  const bestAskTotalSats = bestAsk
+    ? BigInt(bestAsk.priceSats) + buyPlatformFeeSats(bestAsk.priceSats) + BUY_SERVICE_FEE_SATS + 4000n
+    : 0n;
+  const canCoverBestAsk = spendableSats === null || !bestAsk || spendableSats >= bestAskTotalSats;
 
   const loadBook = async ({ quiet = false, preserveMessage = false } = {}) => {
     if (!tokenId) { setOrderBook(null); return; }
@@ -168,7 +195,7 @@ export default function TradingPage({ tokens = [], bsvBalance, address, onSyncAs
   const prepareSell = () => {
     if (!quote) return setQuoteError('Sync the wallet and load a spendable token output first.');
     if (listingPriceSats == null || listingPriceSats < 100) return setQuoteError('Enter a price of at least 0.00000100 BSV.');
-    if (feeAvailableSats !== null && feeAvailableSats < 5000n) return setQuoteError('At least 0.00005000 spendable BSV is needed for transaction fees.');
+    if (spendableSats !== null && spendableSats < 5000n) return setQuoteError('At least 0.00005000 spendable BSV is needed for transaction fees.');
     const amountBase = unitsToBase(sellAmount, decimals);
     if (amountBase === null || amountBase <= 0n) return setQuoteError(`Enter a token amount greater than zero with no more than ${decimals} decimal places.`);
     if (amountBase > BigInt(quote.amountBase)) return setQuoteError('The sell amount exceeds the spendable token output.');
@@ -218,13 +245,6 @@ export default function TradingPage({ tokens = [], bsvBalance, address, onSyncAs
     </form>}
     {importedTokenError && <div className="market-inline-error" role="alert">{importedTokenError}</div>}
 
-    <section className="market-my-orders discovery-orders">
-      <div className="market-section-title"><div><span className="muted-label">ADMIN WALLET DISCOVERY</span><h2>Peer listings</h2></div><button className="secondary-button" onClick={onSyncDiscovery} disabled={discoverySyncing}><RefreshCw size={14} className={discoverySyncing ? 'spin' : ''} />{discoverySyncing ? 'Scanning…' : 'Sync discovery'}</button></div>
-      <p className="market-form-note">Confirmed LBSX sell announcements anchored to the hardcoded admin wallet are checked against their live, unspent OrdLock output.</p>
-      {discoveryError && <div className="market-inline-error">{discoveryError}</div>}
-      {discoveredOrders.length ? discoveredOrders.map(order => <div className="market-own-row" key={order.outpoint}><div><b>{formatUnits(order.amountBase, usableTokens.find(token => token.tokenId === order.tokenId)?.decimals || 0)} · {satsToBsv(order.priceSats)} BSV</b><span><ExplorerReference value={order.tokenId} kind="token" /> · <ExplorerReference value={order.outpoint} kind="outpoint" /> · {order.sellerAddress}</span></div><span className="market-indexer">LIVE ON CHAIN</span></div>) : <div className="market-no-orders">{discoverySyncedAt ? 'No confirmed, unspent LBSX peer listings found in the recent admin-wallet history.' : 'Sync the admin wallet to look for confirmed peer listings.'}</div>}
-      {discoverySyncedAt && <div className="market-book-foot"><span>Discovery sync</span><span>{new Date(discoverySyncedAt).toLocaleString()}</span></div>}
-    </section>
 
     <section className="market-terminal surface-card">
       <header className="market-terminal-head">
@@ -241,7 +261,7 @@ export default function TradingPage({ tokens = [], bsvBalance, address, onSyncAs
       </header>
 
       {usableTokens.length > 0 && <div className="market-balance-strip" aria-label="Wallet trading balances">
-        <div><span>BSV available</span><b>{feeAvailableSats === null ? 'Sync wallet' : `${satsToBsv(feeAvailableSats)} BSV`}</b>{localPendingSats > 0n && <small>{satsToBsv(localPendingSats)} locally tracked · 0-conf spendable</small>}{localPendingSats === 0n && pendingSats !== null && pendingSats !== 0n && <small>{satsToBsv(pendingSats)} unconfirmed · not locally verified</small>}</div>
+        <div><span><BsvText>BSV available</BsvText></span><b><BsvText>{availableSats === null ? 'Sync wallet' : `${formatSats(availableSats)} BSV`}</BsvText></b>{confirmedSats !== null && <small>Confirmed {formatSats(confirmedSats)} · Pending {formatSats(pendingSats ?? 0n)} BSV</small>}{confirmedSats === null && <small>{trackedSpendableSats === null ? 'Sync balances to read your on-chain BSV balance' : `${formatSats(trackedSpendableSats)} locally tracked · 0-conf spendable`}</small>}</div>
         <div><span>{selected?.symbol || 'Token'} balance</span><b>{tokenBalanceBase === null ? '—' : `${formatUnits(tokenBalanceBase, decimals)} ${selected?.symbol || ''}`}</b><small>Wallet total · sell checks a spendable UTXO</small></div>
         <button type="button" onClick={onSyncAssets} disabled={assetsSyncing}><RefreshCw size={13} className={assetsSyncing ? 'spin' : ''} />{assetsSyncing ? 'Syncing' : 'Sync balances'}</button>
       </div>}
@@ -262,7 +282,7 @@ export default function TradingPage({ tokens = [], bsvBalance, address, onSyncAs
                 <span className="market-price">{satsToBsv(listing.priceSats)}</span>
                 <span>{formatUnits(listing.amountBase, listing.decimals ?? decimals)}</span>
                 <div className="market-listing-seller"><div><code title={listing.sellerAddress}>{listing.sellerAddress ? `${listing.sellerAddress.slice(0, 6)}…${listing.sellerAddress.slice(-4)}` : 'Unknown seller'}</code><ExplorerReference value={listing.outpoint} kind="outpoint" compact /></div>{listing.status === 'pending' && <span className="market-pending-tag">PENDING</span>}</div>
-                <button className="market-buy-button" onClick={() => prepareBuy(listing)} title={listing.status === 'pending' ? 'This listing is waiting for confirmation' : 'Review and buy this listing'} disabled={listing.status === 'pending' || (feeAvailableSats !== null && feeAvailableSats < BigInt(listing.priceSats) + 4000n)}><ShoppingCart size={13} />{listing.status === 'pending' ? 'Pending' : 'Buy'}</button>
+                <button className="market-buy-button" onClick={() => prepareBuy(listing)} title={listing.status === 'pending' ? 'This listing is waiting for confirmation' : 'Review and buy this listing'} disabled={listing.status === 'pending' || (spendableSats !== null && spendableSats < BigInt(listing.priceSats) + buyPlatformFeeSats(listing.priceSats) + BUY_SERVICE_FEE_SATS + 4000n)}><ShoppingCart size={13} />{listing.status === 'pending' ? 'Pending' : 'Buy'}</button>
               </div>)}
               {!orders.length && <div className="market-empty compact"><div className="large-empty-icon"><Tag size={20} /></div><h3>{loading ? 'Indexing admin-wallet orders…' : 'No active sell listings'}</h3><p>The wallet scans the admin-wallet OP_RETURN history and verifies each matching BSV-21 OrdLock output with BananaBlocks.</p></div>}
             </div>
@@ -274,20 +294,20 @@ export default function TradingPage({ tokens = [], bsvBalance, address, onSyncAs
             <div className="market-side-toggle"><button className={side === 'buy' ? 'active buy' : ''} onClick={() => chooseSide('buy')}>Buy</button><button className={side === 'sell' ? 'active sell' : ''} onClick={() => chooseSide('sell')}>Sell</button></div>
 
             {side === 'buy' ? <div className="market-order-form">
-              <div className="market-mini-stat"><span>Best listing total</span><b>{orders.length ? `${satsToBsv(orders[0].priceSats)} BSV` : '—'}</b></div>
+              <div className="market-mini-stat"><span>Best listing total</span><b><BsvText>{orders.length ? `${satsToBsv(orders[0].priceSats)} BSV` : '—'}</BsvText></b></div>
               {!canCoverBestAsk && <div className="market-inline-error">Not enough confirmed BSV for the best listing plus the minimum fee reserve. Sync after funding the wallet or choose a lower-priced listing.</div>}
-              {feeAvailableSats === null && <div className="market-inline-error">Sync balances before buying to check BSV available for the listing and transaction fees.</div>}
+              {spendableSats === null && <div className="market-inline-error">Sync balances before buying to check BSV available for the listing and transaction fees.</div>}
               <p className="market-form-note">Choose a live OrdLock listing from the book. Buy orders settle on-chain directly; there is no off-chain matching engine.</p>
-              <button className="primary-button wide" disabled={!orders.length || !canCoverBestAsk || feeAvailableSats === null} onClick={() => orders.length && prepareBuy(orders[0])}><ShoppingCart size={15} />{orders.length ? 'Review best ask' : 'No asks available'}</button>
+              <button className="primary-button wide" disabled={!orders.length || !canCoverBestAsk || spendableSats === null} onClick={() => orders.length && prepareBuy(orders[0])}><ShoppingCart size={15} />{orders.length ? 'Review best ask' : 'No asks available'}</button>
             </div> : <div className="market-order-form">
               <div className="market-mini-stat"><span>Spendable token UTXO</span><b>{quote ? `${formatUnits(quote.amountBase, decimals)} ${selected?.symbol || ''}` : quoteError ? 'Unavailable' : quoteLoading ? 'Checking…' : 'Not loaded'}</b></div>
               {tokenBalanceBase !== null && quote && <div className="market-inline-note">Wallet balance: {formatUnits(tokenBalanceBase, decimals)} {selected?.symbol}. This spendable output can fund a listing up to {formatUnits(quote.amountBase, decimals)} {selected?.symbol}; any unlisted remainder returns to your wallet.</div>}
-              {feeAvailableSats !== null && feeAvailableSats < 5000n && <div className="market-inline-error">At least 0.00005000 spendable BSV is needed for listing transaction fees.</div>}
+              {spendableSats !== null && spendableSats < 5000n && <div className="market-inline-error">At least 0.00005000 spendable BSV is needed for listing transaction fees.</div>}
               {quoteError && <div className="market-inline-error">{quoteError} <button type="button" className="market-retry-quote" onClick={loadSellQuote} disabled={quoteLoading}>Retry lookup</button></div>}
-              <label className="field-label">Total listing price<div className="amount-input"><input value={price} onChange={event => setPrice(event.target.value)} placeholder="0.00010000" inputMode="decimal" /><span>BSV</span></div></label>
+              <label className="field-label">Total listing price<div className="amount-input"><input value={price} onChange={event => setPrice(event.target.value)} placeholder="0.00010000" inputMode="decimal" /><span className="bsv-ticker">BSV</span></div></label>
               <label className="field-label">Token amount<div className="amount-input"><input aria-label="Token amount to sell" value={sellAmount} onChange={event => setSellAmount(event.target.value)} placeholder="0" inputMode="decimal" disabled={!quote} /><span>{selected?.symbol || 'TOKEN'}</span></div></label>
               <p className="market-form-note">Enter the amount to sell. The remainder from this spendable output is returned to your wallet as a separate BSV-21 output. You can cancel the listing later.</p>
-              <button className="primary-button wide" onClick={prepareSell} disabled={!quote || quoteLoading || (feeAvailableSats !== null && feeAvailableSats < 5000n)}><Tag size={15} />Review sell listing</button>
+              <button className="primary-button wide" onClick={prepareSell} disabled={!quote || quoteLoading || (spendableSats !== null && spendableSats < 5000n)}><Tag size={15} />Review sell listing</button>
             </div>}
             <div className="market-local-note"><BadgeCheck size={14} /><span>Keys stay local. BananaBlocks provides confirmed and mempool history; the wallet reconstructs orders from the admin-wallet OP_RETURN and verifies the live OrdLock output.</span></div>
           </section>
@@ -296,7 +316,7 @@ export default function TradingPage({ tokens = [], bsvBalance, address, onSyncAs
         <section className="market-my-orders">
           <div className="market-section-title"><div><span className="muted-label">YOUR SELL ORDERS</span><h2>My listings</h2></div><span className="market-order-count">{ownOrders.length}</span></div>
           {ownOrders.length ? ownOrders.map(listing => <div className="market-own-row" key={listing.outpoint}>
-            <div><b>{formatUnits(listing.amountBase, listing.decimals ?? decimals)} {selected?.symbol || ''}</b><span>{satsToBsv(listing.priceSats)} BSV · <ExplorerReference value={listing.outpoint} kind="outpoint" /></span></div>
+            <div><b>{formatUnits(listing.amountBase, listing.decimals ?? decimals)} {selected?.symbol || ''}</b><span>{satsToBsv(listing.priceSats)} <BsvText>BSV</BsvText> · <ExplorerReference value={listing.outpoint} kind="outpoint" /></span></div>
             {listing.status === 'pending' ? <span className="market-pending-tag">Pending confirmation</span> : <button className="market-cancel-button" onClick={() => setConfirmation({ kind: 'cancel', listing })}><X size={13} />Cancel order</button>}
           </div>) : <div className="market-no-orders">No active listings from this wallet for the selected token.</div>}
         </section>
@@ -309,7 +329,7 @@ export default function TradingPage({ tokens = [], bsvBalance, address, onSyncAs
       <section className="token-modal market-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="market-review-title">
         <header className="token-modal-head"><div><span className="muted-label">LOCAL SIGNING · MAINNET</span><h2 id="market-review-title">Review {confirmation.kind === 'buy' ? 'token purchase' : confirmation.kind === 'sell' ? 'sell listing' : 'order cancellation'}</h2></div><button className="icon-button" onClick={() => setConfirmation(null)} disabled={busy} aria-label="Close">×</button></header>
         <div className="market-review-details">
-          {confirmation.kind === 'sell' ? <><div><span>Token amount</span><b>{formatUnits(confirmation.amountBase, decimals)} {selected?.symbol}</b></div><div><span>Returned token remainder</span><b>{formatUnits(BigInt(quote?.amountBase || '0') - BigInt(confirmation.amountBase), decimals)} {selected?.symbol}</b></div><div><span>Total listing price</span><b>{satsToBsv(confirmation.priceSats)} BSV ({confirmation.priceSats.toLocaleString()} sats)</b></div><div><span>Seller / cancel address</span><code>{address}</code></div><div><span>Order format</span><b>On-chain OrdLock v2</b></div><div><span>Discovery record</span><b>OP_RETURN: token, amount, price, seller, source outpoint</b></div><div><span>Admin-wallet anchor</span><b>1 sat to 15BYCBgXi2…N9nQqp7eB</b></div></> : <><div><span>Token amount</span><b>{formatUnits(confirmation.listing.amountBase, confirmation.listing.decimals ?? decimals)} {selected?.symbol}</b></div><div><span>{confirmation.kind === 'buy' ? 'Payment to seller' : 'Listing price'}</span><b>{satsToBsv(confirmation.listing.priceSats)} BSV ({confirmation.listing.priceSats.toLocaleString()} sats)</b></div><div><span>Listing outpoint</span><ExplorerReference value={confirmation.listing.outpoint} kind="outpoint" /></div><div><span>Action</span><b>{confirmation.kind === 'buy' ? 'Buy and receive BSV-21 token' : 'Cancel and return token to this wallet'}</b></div></>}
+          {confirmation.kind === 'sell' ? <><div><span>Token amount</span><b>{formatUnits(confirmation.amountBase, decimals)} {selected?.symbol}</b></div><div><span>Returned token remainder</span><b>{formatUnits(BigInt(quote?.amountBase || '0') - BigInt(confirmation.amountBase), decimals)} {selected?.symbol}</b></div><div><span>Total listing price</span><b>{satsToBsv(confirmation.priceSats)} BSV ({confirmation.priceSats.toLocaleString()} sats)</b></div><div><span>Seller / cancel address</span><code>{address}</code></div><div><span>Order format</span><b>On-chain OrdLock v2</b></div><div><span>Discovery record</span><b>OP_RETURN: token, amount, price, seller, source outpoint</b></div><div><span>Admin-wallet anchor</span><b>0.0001 BSV to 15BYCBgXi2…N9nQqp7eB</b></div></> : <><div><span>Token amount</span><b>{formatUnits(confirmation.listing.amountBase, confirmation.listing.decimals ?? decimals)} {selected?.symbol}</b></div>{confirmation.kind === 'buy' && <div><span>Listing price</span><b>{satsToBsv(confirmation.listing.priceSats)} BSV</b></div>}<div><span>{confirmation.kind === 'buy' ? 'Payment to seller' : 'Listing price'}</span><b>{satsToBsv(confirmation.listing.priceSats)} BSV ({confirmation.listing.priceSats.toLocaleString()} sats)</b></div>{confirmation.kind === 'buy' && <><div><span>Payment to ADMIN-WALLET ANCHOR</span><b>{satsToBsv(buyPlatformFeeSats(confirmation.listing.priceSats))} BSV ({buyPlatformFeeSats(confirmation.listing.priceSats).toLocaleString()} sats)</b></div><div><span>Service fee</span><b>{satsToBsv(BUY_SERVICE_FEE_SATS)} BSV (10,000 sats)</b></div><div><span>Discovery record</span><b>OP_RETURN: token, amount, price, buyer, source outpoint</b></div></>}<div><span>Listing outpoint</span><ExplorerReference value={confirmation.listing.outpoint} kind="outpoint" /></div><div><span>Action</span><b>{confirmation.kind === 'buy' ? 'Buy and receive BSV-21 token' : 'Cancel and return token to this wallet'}</b></div></>}
         </div>
         {submitError && <div className="market-inline-error" role="alert">{submitError}</div>}
         <p className="token-modal-warning">This signs and broadcasts a mainnet transaction. The action cannot be reversed after broadcast. Check the token, amount, price, and outpoint before continuing.</p>

@@ -128,7 +128,7 @@ try {
   const childActivity = (await walletData.getWalletActivitySnapshot(address)).activities.find(row => row.txid === childSend.txid);
   assert.equal(childActivity.details.walletInputSats, String(firstChange.satoshis), 'local send history records the wallet input value');
   assert.equal(BigInt(childActivity.details.walletInputSats) - BigInt(childActivity.details.changeSats), BigInt(childActivity.details.walletNetSpentSats), 'local send history records returned change and net BSV debit');
-  assert.equal(BigInt(childActivity.details.walletNetSpentSats), BigInt(childSend.amountSats) + BigInt(childActivity.details.feeSats), 'the net BSV debit includes the actual network fee');
+  assert.equal(BigInt(childActivity.details.walletNetSpentSats), BigInt(childSend.amountSats) + BigInt(childSend.serviceFeeSats) + BigInt(childActivity.details.feeSats), 'the net BSV debit includes the service fee and the actual network fee');
   const afterChild = await walletData.getSpendableBsvUtxos(address);
   assert(!afterChild.some(row => row.txid === firstTxid), 'the parent change is no longer spendable after local consumption');
   assert(afterChild.some(row => row.txid === childSend.txid && row.state === 'pending'), 'the child change is available for another 0-conf spend');

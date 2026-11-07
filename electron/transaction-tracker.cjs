@@ -4,7 +4,7 @@ function isDefinitiveBroadcastRejection(value) {
   const message = typeof value === 'string' ? value : String(value?.message || '');
   return value?.code === 'BROADCAST_REJECTED'
     || /(?:\btxStatus\b["']?\s*(?::|=|\s)\s*["']?REJECTED\b|transaction rejected by peer)/i.test(message)
-    || /HTTP 400[\s\S]*(?:invalid outputs|transaction is invalid|dust)/i.test(message);
+    || /HTTP 400[\s\S]*(?:invalid outputs|transaction is invalid|dust|ARC 46\d|malformed)/i.test(message);
 }
 
 async function reconcileDefinitivelyRejectedTransactions(address) {

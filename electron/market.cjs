@@ -7,7 +7,7 @@ const {
   getSpendableBsvUtxos,
   getSpendableUtxoBlocklist,
 } = require('./wallet-data.cjs');
-const { broadcastTrackedTransaction } = require('./transaction-tracker.cjs');
+const { broadcastTrackedTransaction, reconcileDefinitivelyRejectedTransactions } = require('./transaction-tracker.cjs');
 const { ADMIN_DISCOVERY_ADDRESS } = require('./constants.cjs');
 const { ensureHeaderChain, verifyTransactionProof } = require('./spv.cjs');
 const { syncAdminWalletIndex } = require('./admin-wallet-index.cjs');
@@ -15,6 +15,11 @@ const { syncAdminWalletIndex } = require('./admin-wallet-index.cjs');
 const { Transaction, PrivateKey, P2PKH, Script, LockingScript } = bsvSdk;
 const BB_API = 'https://bananablocks.com/api/v1';
 const TXID_RE = /^[0-9a-f]{64}$/i;
+// Indexing fee paid to the admin wallet when a sell order is listed.
+const ADMIN_LISTING_FEE_SATS = 10000;
+// Indexing fee paid to the admin wallet when a sell order is cancelled.
+const ADMIN_CANCEL_FEE_SATS = 10000;
+const ADMIN_BUY_SERVICE_FEE_SATS = 10000;
 const transactionCache = new Map();
 const listingSpendCache = new Map();
 
@@ -74,6 +79,7 @@ async function fetchFeeCandidates(address, minimum = 4000) {
   const expected = new P2PKH().lock(address).toHex();
   const blocked = await getSpendableUtxoBlocklist(address);
   const cached = await getSpendableBsvUtxos(address);
+  const walletData = await getWalletData(address);
   const local = [];
   let localTotal = 0;
   for (const row of cached) {
@@ -89,13 +95,28 @@ async function fetchFeeCandidates(address, minimum = 4000) {
   local.sort((a, b) => b.satoshis - a.satoshis);
   if (localTotal >= minimum) return local;
 
+  const tracked = (walletData.observedBsvUtxos || [])
+    .map(row => ({
+      txid: String(row.txid || '').toLowerCase(),
+      vout: Number(row.vout),
+      satoshis: Number(row.satoshis),
+      blockHeight: Number(row.height ?? row.blockHeight ?? 0),
+    }))
+    .filter(row => TXID_RE.test(row.txid)
+      && Number.isInteger(row.vout) && row.vout >= 0
+      && Number.isSafeInteger(row.satoshis) && row.satoshis > 1
+      && Number.isSafeInteger(row.blockHeight) && row.blockHeight > 0
+      && !blocked.has(`${row.txid}.${row.vout}`)
+      && !local.some(item => item.txid === row.txid && item.vout === row.vout));
+
   const rows = await json(`${BB_API}/bsv/main/address/${encodeURIComponent(address)}/unspent?limit=500`);
   const items = Array.isArray(rows) ? rows : (rows?.items || []);
   const candidates = items
     .filter(row => row?.tx_hash && TXID_RE.test(String(row.tx_hash)) && Number.isInteger(Number(row.tx_pos)) && Number(row.value) > 1 && !row.spent && !row.spent_txid)
     .filter(row => Number(row.height ?? row.block_height ?? 0) > 0
       && !blocked.has(`${String(row.tx_hash).toLowerCase()}.${Number(row.tx_pos)}`)
-      && !local.some(item => item.txid === String(row.tx_hash).toLowerCase() && item.vout === Number(row.tx_pos)))
+      && !local.some(item => item.txid === String(row.tx_hash).toLowerCase() && item.vout === Number(row.tx_pos))
+      && !tracked.some(item => item.txid === String(row.tx_hash).toLowerCase() && item.vout === Number(row.tx_pos)))
     .map(row => ({
       txid: String(row.tx_hash).toLowerCase(),
       vout: Number(row.tx_pos),
@@ -105,7 +126,7 @@ async function fetchFeeCandidates(address, minimum = 4000) {
     .filter(row => Number.isSafeInteger(row.satoshis))
     .sort((a, b) => a.satoshis - b.satoshis);
   if (process.env.LBSX_DEBUG_MARKET === '1') console.log('Fee candidate rows:', items.length, 'usable:', candidates.length);
-  return [...local, ...candidates];
+  return [...local, ...tracked, ...candidates];
 }
 
 async function checkedFeeInputs(address, candidates, target, excluded = new Set()) {
@@ -205,6 +226,20 @@ async function lbsxListingRows(tokenId, walletAddress) {
   }
   for (const transaction of index.transactions) rowsByTxid.set(transaction.txid, transaction);
   const candidates = [];
+  const consumedOutpoints = new Set();
+  for (const row of rowsByTxid.values()) {
+    if (!row.rawTxHex) continue;
+    try {
+      const spendTx = Transaction.fromHex(row.rawTxHex);
+      const spendRecord = orderAnnouncementFromTransaction(spendTx);
+      if (spendRecord?.p === 'lbsx' && (spendRecord.op === 'buy' || spendRecord.op === 'cancel')
+        && spendRecord.anchor === ADMIN_DISCOVERY_ADDRESS) {
+        const spent = parseOutpoint(spendRecord.src);
+        if (spendTx.inputs.some(input => String(input.sourceTXID).toLowerCase() === spent.txid
+          && Number(input.sourceOutputIndex) === spent.vout)) consumedOutpoints.add(spent.canonical);
+      }
+    } catch { /* Ignore malformed announcements. */ }
+  }
   for (const row of rowsByTxid.values()) {
     if (!row.rawTxHex) continue;
     const tx = Transaction.fromHex(row.rawTxHex);
@@ -221,6 +256,7 @@ async function lbsxListingRows(tokenId, walletAddress) {
     const discoveryScript = new P2PKH().lock(ADMIN_DISCOVERY_ADDRESS).toHex();
     if (!tx.outputs.some(output => output.satoshis >= 1 && output.lockingScript.toHex() === discoveryScript)) continue;
     const vout = Number(record.lock);
+    if (consumedOutpoints.has(`${row.txid}.${vout}`)) continue;
     const output = tx.outputs[vout];
     if (!output) continue;
     const { BSV21, OrdLockV2 } = await import('@1sat/templates');
@@ -324,9 +360,9 @@ async function buildAndBroadcastList(privateKey, payload = {}) {
     tx.addOutput({ lockingScript: changeScript, satoshis: 1 });
   }
   // OP_RETURN is transaction metadata, not an output payable to an address.
-  // Pay a 1-sat anchor in the same transaction so address-history indexers can
+  // Pay the indexing fee in the same transaction so address-history indexers can
   // discover and then parse this order announcement.
-  tx.addP2PKHOutput(ADMIN_DISCOVERY_ADDRESS, 1);
+  tx.addP2PKHOutput(ADMIN_DISCOVERY_ADDRESS, ADMIN_LISTING_FEE_SATS);
   const announcement = {
     p: 'lbsx',
     v: 1,
@@ -354,7 +390,7 @@ async function buildAndBroadcastList(privateKey, payload = {}) {
   // the SDK adds leftover sats to the final output (the zero-sat OP_RETURN),
   // which a relay may reject as an invalid output.
   tx.addP2PKHOutput(address);
-  const feeInputs = await checkedFeeInputs(address, await fetchFeeCandidates(address, 4000), 4000);
+  const feeInputs = await checkedFeeInputs(address, await fetchFeeCandidates(address, ADMIN_LISTING_FEE_SATS + 4000), ADMIN_LISTING_FEE_SATS + 4000);
   for (const input of feeInputs) addP2pkhInput(tx, sdkKey, input.sourceTx, input.vout);
   await tx.fee(1000);
   await tx.sign();
@@ -390,20 +426,17 @@ async function buildAndBroadcastBuy(privateKey, payload = {}) {
   const lock = OrdLockV2.decode(listingOutput.lockingScript);
   if (!lock) throw new Error('This listing is not a supported OrdLock v2 BSV-21 listing.');
   const price = Number(lock.price);
-  const candidates = await fetchFeeCandidates(address, price + 3000);
+  const platformFeeSats = Math.max(1, Math.ceil(price / 100));
+  const adminFeeSats = platformFeeSats + ADMIN_BUY_SERVICE_FEE_SATS;
+  const feeReserveSats = adminFeeSats + 3000;
+  await reconcileDefinitivelyRejectedTransactions(address);
+  const candidates = await fetchFeeCandidates(address, price + feeReserveSats);
   const frontCandidates = candidates.filter(item => item.satoshis >= price);
   if (!frontCandidates.length) throw new Error('No single spendable BSV UTXO can cover this listing price.');
   const front = await checkedFeeInputs(address, frontCandidates, price, new Set());
   if (front.length !== 1) throw new Error('This listing price exceeds a single spendable BSV UTXO; consolidate BSV and retry.');
   const excluded = new Set(front.map(item => `${item.txid}.${item.vout}`));
-  let trailingFees;
-  try {
-    trailingFees = await checkedFeeInputs(address, candidates, 3000, excluded);
-  } catch (error) {
-    if (!String(error?.message).startsWith('Not enough confirmed ordinary BSV UTXOs.')
-      || front[0].satoshis < price + 5000) throw error;
-    trailingFees = [];
-  }
+  const trailingFees = await checkedFeeInputs(address, candidates, feeReserveSats, excluded);
 
   const receiveOutput = { lockingScript: tokenScript, satoshis: 1 };
   const plan = OrdLockV2.planPurchase({
@@ -422,6 +455,29 @@ async function buildAndBroadcastBuy(privateKey, payload = {}) {
     }),
   });
   for (const output of plan.outputs) tx.addOutput(output);
+  tx.addP2PKHOutput(ADMIN_DISCOVERY_ADDRESS, adminFeeSats);
+  const announcement = {
+    p: 'lbsx',
+    v: 1,
+    op: 'buy',
+    net: 'main',
+    id: tokenId,
+    amt: String(listing.amountBase),
+    price,
+    buyer: address,
+    src: target.canonical,
+    receive: plan.receiveVouts[0],
+    anchor: ADMIN_DISCOVERY_ADDRESS,
+  };
+  const metadata = Buffer.from(JSON.stringify(announcement), 'utf8');
+  if (metadata.length > 500) throw new Error('The on-chain purchase announcement exceeds the safe metadata size.');
+  const pushPrefix = metadata.length <= 75
+    ? Buffer.from([metadata.length])
+    : metadata.length <= 255
+      ? Buffer.from([0x4c, metadata.length])
+      : Buffer.from([0x4d, metadata.length & 0xff, metadata.length >> 8]);
+  const opReturn = Buffer.concat([Buffer.from([0x00, 0x6a]), pushPrefix, metadata]);
+  tx.addOutput({ lockingScript: Script.fromBinary(opReturn), satoshis: 0 });
   tx.addP2PKHOutput(address);
   for (const input of trailingFees) addP2pkhInput(tx, sdkKey, input.sourceTx, input.vout);
   await tx.fee(1000);
@@ -433,8 +489,23 @@ async function buildAndBroadcastBuy(privateKey, payload = {}) {
     rawHex: tx.toHex(),
     type: 'token-buy',
     inputOutpoints: [...front, ...trailingFees].map(input => `${input.txid}.${input.vout}`),
-    details: { title: 'BSV-21 token purchased', tokenId, tokenAmount: listing.amountBase, decimals: Number(payload.decimals || 0), amountSats: price },
-    broadcast: () => broadcastRawHex(tx.toHex(), txid),
+    details: { title: 'BSV-21 token purchased', tokenId, tokenAmount: listing.amountBase, decimals: Number(payload.decimals || 0), amountSats: price, adminFeeSats },
+    broadcast: async () => {
+      try {
+        return await broadcastRawHex(tx.toHex(), txid);
+      } catch (error) {
+        try {
+          const dir = require('path').join(require('os').tmpdir(), 'lbsx-failed-buys');
+          require('fs').mkdirSync(dir, { recursive: true });
+          require('fs').writeFileSync(require('path').join(dir, `${txid}.json`), JSON.stringify({
+            rawHex: tx.toHex(),
+            ef: tx.toHexEF(),
+            error: String(error?.message || error),
+          }));
+        } catch { /* diagnostics only */ }
+        throw error;
+      }
+    },
   });
   listingSpendCache.delete(target.canonical);
   return { txid, tokenId, amountBase: listing.amountBase, priceSats: price, outpoint: target.canonical };
@@ -463,8 +534,35 @@ async function buildAndBroadcastCancel(privateKey, payload = {}) {
     unlockingScriptTemplate: OrdLockV2.cancelListing(sdkKey, 'all', false, output.satoshis, output.lockingScript),
   });
   tx.addOutput({ lockingScript: transfer, satoshis: 1 });
+  // Pay the indexing fee in the same transaction so address-history indexers can
+  // discover and then parse this cancellation announcement.
+  tx.addP2PKHOutput(ADMIN_DISCOVERY_ADDRESS, ADMIN_CANCEL_FEE_SATS);
+  const announcement = {
+    p: 'lbsx',
+    v: 1,
+    op: 'cancel',
+    net: 'main',
+    id: tokenId,
+    amt: String(listing.amountBase),
+    price: Number(lock.price),
+    maker: address,
+    src: `${target.txid}.${target.vout}`,
+    lock: 0,
+    anchor: ADMIN_DISCOVERY_ADDRESS,
+  };
+  const metadata = Buffer.from(JSON.stringify(announcement), 'utf8');
+  if (metadata.length > 500) throw new Error('The on-chain order announcement exceeds the safe metadata size.');
+  const pushPrefix = metadata.length <= 75
+    ? Buffer.from([metadata.length])
+    : metadata.length <= 255
+      ? Buffer.from([0x4c, metadata.length])
+      : Buffer.from([0x4d, metadata.length & 0xff, metadata.length >> 8]);
+  const opReturn = Buffer.concat([Buffer.from([0x00, 0x6a]), pushPrefix, metadata]);
+  tx.addOutput({ lockingScript: Script.fromBinary(opReturn), satoshis: 0 });
+  // Give fee() a real change destination, and keep it last so leftover sats
+  // never land on the zero-sat OP_RETURN.
   tx.addP2PKHOutput(address);
-  const feeInputs = await checkedFeeInputs(address, await fetchFeeCandidates(address, 4000), 4000);
+  const feeInputs = await checkedFeeInputs(address, await fetchFeeCandidates(address, ADMIN_CANCEL_FEE_SATS + 4000), ADMIN_CANCEL_FEE_SATS + 4000);
   for (const input of feeInputs) addP2pkhInput(tx, sdkKey, input.sourceTx, input.vout);
   await tx.fee(1000);
   await tx.sign();

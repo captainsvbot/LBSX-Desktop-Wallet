@@ -7,6 +7,50 @@ const SETTINGS_VERSION = 1;
 const SETTINGS_FILE = 'bananablocks-api-key.json';
 let cachedApiKey = null;
 
+// BananaBlocks enforces a shared request budget per client (80 requests per
+// rolling 60 second window by default). Every caller in this app talks to the
+// same API, so the budget is tracked once here: responses report the current
+// limit and the remaining allowance, and callers wait for the window to roll
+// over instead of spending their request on a guaranteed HTTP 429.
+const RATE_LIMIT_WINDOW_MS = 60_000;
+let rateLimitWindowMs = RATE_LIMIT_WINDOW_MS;
+const rateLimit = { limit: null, remaining: null, windowStart: 0, blockedUntil: 0 };
+
+function noteRateLimit(response) {
+  const now = Date.now();
+  const limit = Number(response?.headers?.get?.('x-ratelimit-limit'));
+  const remaining = Number(response?.headers?.get?.('x-ratelimit-remaining'));
+  if (Number.isFinite(limit) && limit > 0 && Number.isFinite(remaining)) {
+    if (rateLimit.limit !== limit || rateLimit.remaining === null || remaining > rateLimit.remaining) {
+      // The allowance went back up, so the window rolled over. Work out when it
+      // started by assuming the allowance is spent evenly across the window.
+      rateLimit.windowStart = now - (limit - remaining) * (rateLimitWindowMs / limit);
+    }
+    rateLimit.limit = limit;
+    rateLimit.remaining = remaining;
+  }
+  if (response?.status === 429) {
+    rateLimit.remaining = 0;
+    rateLimit.blockedUntil = Math.max(rateLimit.blockedUntil, rateLimit.windowStart + rateLimitWindowMs, now + 1000);
+  }
+  if (rateLimit.blockedUntil && rateLimit.blockedUntil <= now) rateLimit.blockedUntil = 0;
+}
+
+// Called before a request is issued so the wait happens outside any per
+// request timeout the caller may have started.
+async function waitForRateLimitBudget() {
+  const now = Date.now();
+  if (rateLimit.remaining === null || rateLimit.remaining > 0) return;
+  const until = Math.max(rateLimit.blockedUntil, rateLimit.windowStart + rateLimitWindowMs);
+  const waitMs = until - now;
+  if (waitMs <= 0) return;
+  await new Promise(resolve => setTimeout(resolve, waitMs + 250));
+}
+
+function getRateLimitStatus() {
+  return { limit: rateLimit.limit, remaining: rateLimit.remaining, blockedUntil: rateLimit.blockedUntil };
+}
+
 function settingsPath() {
   return path.join(app.getPath('userData'), SETTINGS_FILE);
 }
@@ -116,12 +160,28 @@ async function bananaBlocksFetch(input, options = {}) {
       options = { ...options, headers };
     }
   }
-  return fetch(input, options);
+  const response = await fetch(input, options);
+  noteRateLimit(response);
+  return response;
 }
 
 module.exports = {
   bananaBlocksFetch,
+  waitForRateLimitBudget,
+  getRateLimitStatus,
   getBananaBlocksApiKeyStatus,
   saveBananaBlocksApiKey,
   removeBananaBlocksApiKey,
+  _test: {
+    resetRateLimit() {
+      rateLimit.limit = null;
+      rateLimit.remaining = null;
+      rateLimit.windowStart = 0;
+      rateLimit.blockedUntil = 0;
+    },
+    setRateLimitWindowMs(value) {
+      if (!Number.isFinite(value) || value < 0) throw new Error('Test rate limit window must be a non-negative number.');
+      rateLimitWindowMs = value;
+    },
+  },
 };

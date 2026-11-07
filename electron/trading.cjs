@@ -115,6 +115,52 @@ async function verifyLiveSellOrder(txid, transaction, record, confirmed, { refre
   return { outpoint, txid, tokenId: record.id, amountBase: String(record.amt), priceSats: Number(record.price), sellerAddress: record.maker, sourceOutpoint: record.src, blockHeight };
 }
 
+async function verifyLiveCancelOrder(txid, transaction, record, confirmed) {
+  if (!confirmed || record.v !== 1 || record.op !== 'cancel' || record.net !== 'main' || record.anchor !== ADMIN_DISCOVERY_ADDRESS) return null;
+  if (!/^[0-9a-f]{64}_[0-9]+$/i.test(String(record.id)) || !/^\d+$/.test(String(record.amt)) || BigInt(record.amt) <= 0n) return null;
+  if (!/^[0-9a-zA-Z]{26,62}$/.test(String(record.maker))) return null;
+  if (!/^[0-9a-f]{64}[._:][0-9]+$/i.test(String(record.src)) || !Number.isInteger(Number(record.lock))) return null;
+  const { Transaction, P2PKH } = require('@bsv/sdk');
+  const { BSV21 } = await import('@1sat/templates');
+  const parsed = Transaction.fromHex(transaction);
+  const [sourceTxid, sourceVoutText] = String(record.src).split(/[._:]/);
+  const sourceVout = Number(sourceVoutText);
+  if (!parsed.inputs.some(input => String(input.sourceTXID).toLowerCase() === sourceTxid.toLowerCase() && Number(input.sourceOutputIndex) === sourceVout)) return null;
+  const discoveryScript = new P2PKH().lock(ADMIN_DISCOVERY_ADDRESS).toHex();
+  if (!parsed.outputs.some(output => Number(output.satoshis) >= 1 && output.lockingScript.toHex() === discoveryScript)) return null;
+  const output = parsed.outputs[Number(record.lock)];
+  if (!output) return null;
+  const token = BSV21.decode(output.lockingScript);
+  if (!token || token.getOperation() !== 'transfer' || token.getTokenId() !== record.id || token.getAmount() !== BigInt(record.amt)) return null;
+  const expectedScript = BSV21.transfer(record.id, BigInt(record.amt)).lock(new P2PKH().lock(record.maker)).toHex();
+  if (output.lockingScript.toHex() !== expectedScript) return null;
+  return { cancelledOutpoint: `${sourceTxid}.${sourceVout}`, txid, tokenId: record.id, amountBase: String(record.amt), maker: record.maker };
+}
+
+async function verifyLiveBuyOrder(txid, transaction, record, confirmed) {
+  if (!confirmed || record.v !== 1 || record.op !== 'buy' || record.net !== 'main' || record.anchor !== ADMIN_DISCOVERY_ADDRESS) return null;
+  if (!/^[0-9a-f]{64}_[0-9]+$/i.test(String(record.id)) || !/^\d+$/.test(String(record.amt)) || BigInt(record.amt) <= 0n) return null;
+  if (!Number.isSafeInteger(Number(record.price)) || Number(record.price) < 100 || !/^[0-9a-zA-Z]{26,62}$/.test(String(record.buyer))) return null;
+  if (!/^[0-9a-f]{64}[._:][0-9]+$/i.test(String(record.src)) || !Number.isInteger(Number(record.receive))) return null;
+  const { Transaction, P2PKH } = require('@bsv/sdk');
+  const { BSV21 } = await import('@1sat/templates');
+  const parsed = Transaction.fromHex(transaction);
+  const [sourceTxid, sourceVoutText] = String(record.src).split(/[._:]/);
+  const sourceVout = Number(sourceVoutText);
+  if (!parsed.inputs.some(input => String(input.sourceTXID).toLowerCase() === sourceTxid.toLowerCase() && Number(input.sourceOutputIndex) === sourceVout)) return null;
+  const discoveryScript = new P2PKH().lock(ADMIN_DISCOVERY_ADDRESS).toHex();
+  const requiredAdminSats = Math.max(1, Math.ceil(Number(record.price) / 100)) + 10000;
+  const paidAdminSats = parsed.outputs
+    .filter(output => output.lockingScript.toHex() === discoveryScript)
+    .reduce((sum, output) => sum + Number(output.satoshis || 0), 0);
+  if (paidAdminSats < requiredAdminSats) return null;
+  const output = parsed.outputs[Number(record.receive)];
+  if (!output || Number(output.satoshis) !== 1) return null;
+  const expectedScript = BSV21.transfer(record.id, BigInt(record.amt)).lock(new P2PKH().lock(record.buyer)).toHex();
+  if (output.lockingScript.toHex() !== expectedScript) return null;
+  return { txid, tokenId: record.id, amountBase: String(record.amt), priceSats: Number(record.price), buyer: record.buyer, sourceOutpoint: `${sourceTxid}.${sourceVout}` };
+}
+
 async function buildTradingDiscoverySnapshot(index, refreshLiveListings) {
   const rows = index.transactions.map(transaction => summarizeTransaction({
     ...transaction.details,
@@ -124,12 +170,34 @@ async function buildTradingDiscoverySnapshot(index, refreshLiveListings) {
     confirmed: transaction.confirmed,
   })).filter(row => row.txid);
   const discoveredOrders = [];
+  const discoveredPurchases = [];
+  const cancelledOutpoints = new Set();
   const errors = [...(index.errors || [])];
   for (const transaction of index.transactions) {
     if (!transaction.rawTxHex) continue;
     const announcement = parseOrderAnnouncement(transaction.rawTxHex);
     if (!announcement) continue;
     try {
+      if (announcement.op === 'cancel') {
+        const cancellation = await verifyLiveCancelOrder(
+          transaction.txid,
+          transaction.rawTxHex,
+          announcement,
+          transaction.confirmed,
+        );
+        if (cancellation) cancelledOutpoints.add(cancellation.cancelledOutpoint);
+        continue;
+      }
+      if (announcement.op === 'buy') {
+        const purchase = await verifyLiveBuyOrder(
+          transaction.txid,
+          transaction.rawTxHex,
+          announcement,
+          transaction.confirmed,
+        );
+        if (purchase) discoveredPurchases.push(purchase);
+        continue;
+      }
       const order = await verifyLiveSellOrder(
         transaction.txid,
         transaction.rawTxHex,
@@ -146,6 +214,8 @@ async function buildTradingDiscoverySnapshot(index, refreshLiveListings) {
       errors.push(`Listing ${transaction.txid.slice(0, 10)} could not be checked for spends: ${error.message}`);
     }
   }
+  const liveOrders = discoveredOrders.filter(order => !cancelledOutpoints.has(order.outpoint)
+    && !discoveredPurchases.some(purchase => purchase.sourceOutpoint === order.outpoint));
   const tradeRows = rows.filter(row => row.classification === 'fee-linked-settlement-candidate');
   const markets = new Map();
   for (const row of tradeRows) {
@@ -177,9 +247,12 @@ async function buildTradingDiscoverySnapshot(index, refreshLiveListings) {
     historyComplete: index.historyComplete,
     scannedTransactions: index.scannedTransactions,
     lookupFailures: index.lookupFailures,
+    status: index.status || null,
     errors,
     transactions: rows.sort((a, b) => b.blockHeight - a.blockHeight || b.blockTime - a.blockTime),
-    discoveredOrders: [...new Map(discoveredOrders.map(order => [order.outpoint, order])).values()],
+    discoveredOrders: [...new Map(liveOrders.map(order => [order.outpoint, order])).values()],
+    cancelledOrders: [...cancelledOutpoints],
+    discoveredPurchases,
     markets: marketRows.sort((a, b) => b.latestBlockHeight - a.latestBlockHeight),
     note: 'Admin-wallet history and BEEF proofs are stored in this wallet’s encrypted local index. Listings are rechecked for current spend status before display.',
   };
@@ -201,5 +274,7 @@ module.exports = {
   getTradingDiscoveryCache,
   parseOrderAnnouncement,
   verifyLiveSellOrder,
+  verifyLiveCancelOrder,
+  verifyLiveBuyOrder,
   _test: { summarizeTransaction, extractBsv21 },
 };

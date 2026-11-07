@@ -1,6 +1,6 @@
 const bsvModule = require('bsv');
 const bsv = bsvModule.default || bsvModule;
-const { bananaBlocksFetch } = require('./bananablocks.cjs');
+const { bananaBlocksFetch, waitForRateLimitBudget } = require('./bananablocks.cjs');
 const {
   cacheObservedBsvUtxos,
   getWalletData,
@@ -12,6 +12,7 @@ const {
 } = require('./wallet-data.cjs');
 const { _market: { fetchSpendableTokenOutput, syncSpendableBsvUtxos } } = require('./token-wallet.cjs');
 const { reconcileDefinitivelyRejectedTransactions } = require('./transaction-tracker.cjs');
+const { fetchAllUnspentUtxos } = require('./bsv-unspent.cjs');
 const { reportProgress } = require('./spv.cjs');
 
 const BB_API = 'https://bananablocks.com/api/v1';
@@ -36,15 +37,18 @@ function rateLimitDelay(response, attempt) {
   return Math.min(30000, 1000 * (2 ** attempt));
 }
 
-function requestBananaBlocks(url, attempt) {
+function requestBananaBlocks(url, attempt, init = {}) {
   const request = apiRequestQueue.catch(() => {}).then(async () => {
     const waitMs = Math.max(0, nextApiRequestAt - Date.now());
     if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+    await waitForRateLimitBudget();
     let response;
     try {
       response = await bananaBlocksFetch(url, {
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(15000),
+        method: init.method || 'GET',
+        headers: { Accept: 'application/json', ...(init.headers || {}) },
+        body: init.body,
+        signal: AbortSignal.timeout(init.timeout || 15000),
       });
     } catch (error) {
       nextApiRequestAt = Date.now() + apiMinIntervalMs;
@@ -108,12 +112,13 @@ async function syncWalletBalancesOnce(address) {
   const encodedAddress = encodeURIComponent(address);
   const balanceUrl = `${BB_API}/bsv/main/address/${encodedAddress}/balance`;
   const tokensUrl = `${BB_API}/address/${encodedAddress}/tokens`;
-  const utxoUrl = `${BB_API}/bsv/main/address/${encodedAddress}/unspent?limit=500`;
 
   const [balanceResult, tokenResult, utxoResult] = await Promise.allSettled([
     fetchJson(balanceUrl),
     fetchJson(tokensUrl),
-    fetchJson(utxoUrl),
+    fetchAllUnspentUtxos(address, {
+      onProgress: progress => reportProgress({ phase: 'scanning-wallet-utxos', ...progress }),
+    }),
   ]);
   reportProgress({ phase: 'fetching-wallet-data', completed: 1, total: 1 });
 
@@ -181,11 +186,11 @@ async function syncWalletBalancesOnce(address) {
   let utxoError = null;
   let utxoCount = null;
   if (utxoResult.status === 'fulfilled') {
-    const rows = responseRows(utxoResult.value);
+    const rows = utxoResult.value;
     if (!Array.isArray(rows)) utxoError = 'The BSV UTXO response had an unexpected format.';
     else {
       try {
-        await cacheObservedBsvUtxos(address, rows, { complete: rows.length < 500 });
+        await cacheObservedBsvUtxos(address, rows, { complete: true });
         const verification = await syncSpendableBsvUtxos(address, rows, progress => {
           reportProgress({ phase: 'verifying-cash-utxos', ...progress });
         });
@@ -194,7 +199,6 @@ async function syncWalletBalancesOnce(address) {
         if (verification.failures > 0) {
           warnings.push(`${verification.failures} confirmed BSV UTXO(s) could not be verified.`);
         }
-        if (verification.limited) warnings.push('Only the first 100 confirmed BSV UTXO candidates were verified.');
         if (warnings.length) utxoError = warnings.join(' ');
       } catch (error) {
         utxoError = error.message || 'Could not verify and store the local BSV UTXO snapshot.';
@@ -264,7 +268,7 @@ function historyHeight(row) {
   return Number.isSafeInteger(height) && height > 0 ? height : 0;
 }
 
-async function fetchAddressHistory(address, knownTxids, alreadyBackfilled, startCursor = null, startPage = 0) {
+async function fetchAddressHistory(address, knownTxids, alreadyBackfilled, startCursor = null, startPage = 0, { onProgress = null } = {}) {
   const refs = new Map();
   const errors = [];
   let complete = false;
@@ -316,6 +320,9 @@ async function fetchAddressHistory(address, knownTxids, alreadyBackfilled, start
     pagesRead++;
     pageCount++;
     nextPage = pageCount;
+    if (typeof onProgress === 'function') {
+      onProgress({ phase: 'activity-history-page', completed: pageCount, count: refs.size });
+    }
 
     const hasMoreHeader = response.headers?.get('x-has-more');
     const continuation = response.headers?.get('x-next-cursor') || null;
@@ -352,6 +359,7 @@ async function fetchAddressHistory(address, knownTxids, alreadyBackfilled, start
 
   if (!rateLimited) {
     try {
+      if (typeof onProgress === 'function') onProgress({ phase: 'activity-unconfirmed-history', completed: 0, count: refs.size });
       const body = await fetchJson(`${BB_API}/bsv/main/address/${encodeURIComponent(address)}/unconfirmed/history?limit=100`);
       for (const row of responseRows(body)) {
         const txid = historyTxid(row);
@@ -568,10 +576,9 @@ async function syncRecentUnconfirmedActivity(address) {
 }
 
 async function syncObservedUtxos(address) {
-  const body = await fetchJson(`${BB_API}/bsv/main/address/${encodeURIComponent(address)}/unspent?limit=500`);
-  const rows = responseRows(body);
+  const rows = await fetchAllUnspentUtxos(address);
   if (!Array.isArray(rows)) throw new Error('BananaBlocks returned an unexpected wallet UTXO response.');
-  await cacheObservedBsvUtxos(address, rows, { complete: rows.length < 500 });
+  await cacheObservedBsvUtxos(address, rows, { complete: true });
   return rows.length;
 }
 
@@ -596,7 +603,7 @@ async function checkTrackedPendingTransactionStatuses(address, { historyRefs = n
         status = String(body?.txStatus || body?.status || '').toUpperCase();
       }
       let activity = null;
-      if (['REJECTED', 'DOUBLE_SPEND_ATTEMPTED'].includes(status)) {
+      if (['REJECTED', 'DOUBLE_SPEND_ATTEMPTED', 'SEEN_IN_ORPHAN_MEMPOOL'].includes(status)) {
         await setWalletTransactionStatus(address, txid, 'rejected', status);
         const priorActivity = existingByTxid.get(txid) || {};
         activity = {
@@ -637,8 +644,12 @@ async function checkTrackedPendingTransactionStatuses(address, { historyRefs = n
   return { activities, errors, checkedTransactions: transactions.length, checkedAt };
 }
 
-async function syncWalletActivity(address) {
+async function syncWalletActivity(address, { onProgress = null } = {}) {
+  const report = typeof onProgress === 'function'
+    ? (payload) => { try { onProgress(payload); } catch { /* progress reporting must never break a sync */ } }
+    : () => {};
   if (!bsv.Address.isValid(address, 'livenet')) throw new Error('The active wallet address is invalid.');
+  report({ phase: 'activity-reconciling', completed: 0, total: 0 });
   await reconcileDefinitivelyRejectedTransactions(address);
   const prior = await getWalletData(address);
   const knownTxids = new Set([
@@ -651,6 +662,7 @@ async function syncWalletActivity(address) {
     prior.historyBackfillComplete === true,
     prior.historyCursor || null,
     prior.historyCursor ? Number(prior.historyPageCursor || 0) : 0,
+    { onProgress: report },
   );
   const refByTxid = new Map(refs.map(ref => [ref.txid, ref]));
   const existingByTxid = new Map(prior.activities.filter(row => row.txid).map(row => [row.txid, row]));
@@ -666,7 +678,11 @@ async function syncWalletActivity(address) {
   const detailFailures = [];
   const processedTxids = new Set();
   let rateLimited = historyRateLimited;
-  for (const ref of rateLimited ? [] : selectedRefs) {
+  const detailTargets = rateLimited ? [] : selectedRefs;
+  let detailIndex = 0;
+  for (const ref of detailTargets) {
+    detailIndex += 1;
+    report({ phase: 'activity-loading-transactions', completed: detailIndex, total: detailTargets.length, count: activities.length });
     const existing = existingByTxid.get(ref.txid);
     if (localTransactions.has(ref.txid)) {
       activities.push(summarizeWalletTransaction({}, address, ref, existing || {
@@ -715,6 +731,7 @@ async function syncWalletActivity(address) {
   }
 
   if (!rateLimited) {
+    report({ phase: 'activity-checking-pending', completed: 0, total: 0 });
     const statusCheck = await checkTrackedPendingTransactionStatuses(address, {
       historyRefs: refByTxid,
     });
@@ -732,6 +749,7 @@ async function syncWalletActivity(address) {
   let utxoCount = null;
   if (rateLimited) errors.push('BananaBlocks is rate limiting requests. Remaining history and transaction lookups have been saved for a later refresh.');
   else {
+    report({ phase: 'activity-refreshing-utxos', completed: 0, total: 0 });
     try { utxoCount = await syncObservedUtxos(address); }
     catch (error) {
       errors.push(`UTXO snapshot could not be refreshed: ${error.message}`);
@@ -740,6 +758,7 @@ async function syncWalletActivity(address) {
   }
 
   const syncedAt = new Date().toISOString();
+  report({ phase: 'activity-saving', completed: activities.length, total: activities.length });
   const snapshot = await mergeChainActivity(address, activities, syncedAt, {
     remaining,
     errors,
@@ -748,7 +767,7 @@ async function syncWalletActivity(address) {
     historyPageCursor,
     historyBackfillQueue,
   });
-  return {
+  const result = {
     ...snapshot,
     scannedTransactions: refs.length,
     processedTransactions: activities.length,
@@ -756,6 +775,15 @@ async function syncWalletActivity(address) {
     historyPageCursor,
     utxoCount,
   };
+  report({
+    phase: 'activity-complete',
+    completed: activities.length,
+    total: activities.length,
+    count: refs.length,
+    rateLimited,
+    remaining,
+  });
+  return result;
 }
 
 async function checkPendingTransactionStatuses(address) {
@@ -773,6 +801,7 @@ module.exports = {
   syncWalletActivity,
   checkPendingTransactionStatuses,
   syncObservedUtxos,
+  requestBananaBlocks,
   _test: {
     summarizeWalletTransaction,
     syncRecentUnconfirmedActivity,

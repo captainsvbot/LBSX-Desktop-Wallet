@@ -3,12 +3,13 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { getVaultStatus, importVault, unlockVault, lockVault, getWalletSummary, getWalletPrivateKey } = require('./vault.cjs');
 const { syncWalletBalances, syncWalletActivity, checkPendingTransactionStatuses } = require('./chain.cjs');
-const { sendBsv, sendPeerChatMessage, sendToken, mintBsv21Token, createTokenLock, claimTokenLock, getTokenLocks, migrateLegacyTokenLocks, getTokenIconData } = require('./token-wallet.cjs');
+const { sendBsv, estimateBsvSendFee, sendPeerChatMessage, sendToken, mintBsv21Token, createTokenLock, claimTokenLock, getTokenLocks, migrateLegacyTokenLocks, getTokenIconData } = require('./token-wallet.cjs');
 const { syncPeerChat, getPeerChatSnapshot } = require('./peer-chat.cjs');
 const { syncTradingDiscovery, getTradingDiscoveryCache } = require('./trading.cjs');
 const { getTokenOrderBook, getTokenMarketInfo, getTokenSellQuote, buildAndBroadcastList, buildAndBroadcastBuy, buildAndBroadcastCancel } = require('./market.cjs');
 const { getBananaBlocksApiKeyStatus, saveBananaBlocksApiKey, removeBananaBlocksApiKey } = require('./bananablocks.cjs');
-const { getWalletActivitySnapshot, saveImportedToken } = require('./wallet-data.cjs');
+const { getWalletActivitySnapshot, saveImportedToken, getWalletUtxoStore } = require('./wallet-data.cjs');
+const { deleteConnectedWallet } = require('./wallet-deletion.cjs');
 const { onProgress: onSpvProgress } = require('./spv.cjs');
 const { buildBananaBlocksUrl } = require('./explorer.cjs');
 
@@ -70,13 +71,19 @@ ipcMain.handle('app:open-explorer', async (event, reference = {}) => {
 ipcMain.handle('vault:import', async (_event, payload) => importVault(payload));
 ipcMain.handle('vault:unlock', async (_event, payload) => unlockVault(payload));
 ipcMain.handle('vault:lock', () => { lockVault(); return { locked: true }; });
+ipcMain.handle('vault:delete', () => deleteConnectedWallet(app.getPath('userData')));
 ipcMain.handle('wallet:summary', () => getWalletSummary());
 ipcMain.handle('wallet:get-activity', async () => {
   const address = getWalletSummary().address;
   await migrateLegacyTokenLocks(address);
   return getWalletActivitySnapshot(address);
 });
-ipcMain.handle('wallet:sync-activity', () => syncWalletActivity(getWalletSummary().address));
+ipcMain.handle('wallet:sync-activity', () => syncWalletActivity(getWalletSummary().address, {
+  onProgress: (payload) => {
+    try { mainWindow?.webContents.send('wallet:activity-progress', payload); }
+    catch { /* progress reporting must never break a sync */ }
+  },
+}));
 ipcMain.handle('wallet:check-pending-statuses', async () => {
   const address = getWalletSummary().address;
   if (app.isPackaged && process.env.LBSX_TEST_PACKAGED === '1') {
@@ -86,6 +93,7 @@ ipcMain.handle('wallet:check-pending-statuses', async () => {
 });
 ipcMain.handle('wallet:get-imported-tokens', async () => (await getWalletActivitySnapshot(getWalletSummary().address)).importedTokens);
 ipcMain.handle('wallet:save-imported-token', (_event, token) => saveImportedToken(getWalletSummary().address, token));
+ipcMain.handle('wallet:utxo-store', (_event, payload) => getWalletUtxoStore(getWalletSummary().address, payload || {}));
 ipcMain.handle('wallet:sync-balances', async () => {
   const tokenFixture = (!app.isPackaged && process.env.LBSX_TEST_TOKEN_FIXTURE === '1')
     || (app.isPackaged && process.env.LBSX_TEST_PACKAGED === '1');
@@ -117,6 +125,9 @@ ipcMain.handle('token:get-icon', async (_event, token) => {
 ipcMain.handle('wallet:send-bsv', (_event, payload) => !app.isPackaged && process.env.LBSX_TEST_TOKEN_FIXTURE === '1'
   ? { txid: '99'.repeat(32), recipient: payload.recipient, amountSats: Math.round(Number(payload.amount) * 100000000), feeSats: 250 }
   : sendBsv(getWalletPrivateKey(), payload));
+ipcMain.handle('wallet:estimate-bsv-send', (_event, payload) => !app.isPackaged && process.env.LBSX_TEST_TOKEN_FIXTURE === '1'
+  ? { feeSats: 250, serviceFeeSats: 10000, amountSats: Math.round(Number(payload.amount) * 100000000), sizeBytes: 250 }
+  : estimateBsvSendFee(getWalletPrivateKey(), payload));
 ipcMain.handle('wallet:mint-bsv21', (_event, payload) => mintBsv21Token(getWalletPrivateKey(), payload));
 const tradingFixture = () => ({
   address: '15BYCBgXi2GWXEvJNJJGfcYxeN9nQqp7eB', source: 'E2E fixture', syncedAt: new Date().toISOString(),
@@ -204,7 +215,12 @@ ipcMain.handle('peer-chat:get', () => app.isPackaged && process.env.LBSX_TEST_PA
   : getPeerChatSnapshot(getWalletSummary().address));
 ipcMain.handle('peer-chat:sync', () => app.isPackaged && process.env.LBSX_TEST_PACKAGED === '1'
   ? peerChatFixture()
-  : syncPeerChat(getWalletSummary().address));
+  : syncPeerChat(getWalletSummary().address, {
+    onProgress: (payload) => {
+      try { mainWindow?.webContents.send('wallet:peer-chat-progress', payload); }
+      catch { /* progress reporting must never break a sync */ }
+    },
+  }));
 ipcMain.handle('peer-chat:send', (_event, payload) => app.isPackaged && process.env.LBSX_TEST_PACKAGED === '1'
   ? { txid: 'bb'.repeat(32), senderAddress: getWalletSummary().address, content: String(payload?.message || '').trim(), timestamp: new Date().toISOString(), status: 'pending', feeSats: 250 }
   : sendPeerChatMessage(getWalletPrivateKey(), payload));
