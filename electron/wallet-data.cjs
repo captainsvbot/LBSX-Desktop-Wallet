@@ -8,8 +8,6 @@ const { getWalletDataEncryptionKey } = require('./vault.cjs');
 
 const DATA_VERSION = 1;
 const TXID_RE = /^[0-9a-f]{64}$/i;
-const MAX_ADMIN_INDEX_TRANSACTIONS = 5000;
-const MAX_ADMIN_INDEX_PENDING_TRANSACTIONS = 1000;
 const MAX_ADMIN_INDEX_TX_BYTES = 4 * 1024 * 1024;
 const UTXO_STORE_PAGE_SIZE = 20;
 const writeQueues = new Map();
@@ -53,6 +51,20 @@ function emptyData(address) {
     adminWalletSyncedAt: null,
     adminWalletHistoryCursor: null,
     adminWalletHistoryComplete: false,
+    mailMessages: [],
+    mailContacts: [],
+    mailSyncedAt: null,
+    // Public keys whose mail is treated as spam. A spam-flagged sender's
+    // future mail is filed into the Spam tab instead of the inbox.
+    mailSpamSenders: [],
+    // Message ids the user deleted from their local mailbox record.
+    mailDeletedMessageIds: [],
+    // Message ids the user pinned. A pinned message stays at the top of its
+    // list so it cannot be scrolled away from.
+    mailPinnedMessageIds: [],
+    // Unsent mail the user saved as a draft. Drafts are LOCAL ONLY - they
+    // live in the encrypted wallet data and are never broadcast.
+    mailDrafts: [],
   };
 }
 
@@ -102,6 +114,36 @@ function validateData(value, address) {
   }
   if (typeof value.historyCursor !== 'string' || !value.historyCursor || value.historyCursor.length > 4096) value.historyCursor = null;
   if (!Number.isSafeInteger(value.historyPageCursor) || value.historyPageCursor < 0) value.historyPageCursor = 0;
+  if (value.mailMessages === undefined) value.mailMessages = [];
+  if (!Array.isArray(value.mailMessages)) throw new Error('The encrypted mail cache is invalid.');
+  value.mailMessages = value.mailMessages.map(normalizeMailMessage);
+  if (value.mailContacts === undefined) value.mailContacts = [];
+  if (!Array.isArray(value.mailContacts)) throw new Error('The encrypted mail contact list is invalid.');
+  value.mailContacts = value.mailContacts.map(normalizeMailContact);
+  if (value.mailSyncedAt === undefined) value.mailSyncedAt = null;
+  if (value.mailSyncedAt !== null && !Number.isFinite(Date.parse(value.mailSyncedAt))) {
+    throw new Error('The encrypted mail sync timestamp is invalid.');
+  }
+  if (value.mailSpamSenders === undefined) value.mailSpamSenders = [];
+  if (!Array.isArray(value.mailSpamSenders)) throw new Error('The encrypted mail spam sender list is invalid.');
+  value.mailSpamSenders = value.mailSpamSenders.map(normalizeMailSpamSender);
+  if (value.mailDeletedMessageIds === undefined) value.mailDeletedMessageIds = [];
+  if (!Array.isArray(value.mailDeletedMessageIds)) throw new Error('The encrypted mail deleted-message list is invalid.');
+  value.mailDeletedMessageIds = value.mailDeletedMessageIds
+    .map(id => String(id || '').trim().toLowerCase())
+    .filter(id => /^[0-9a-f]{64}$/.test(id));
+  if (value.mailPinnedMessageIds === undefined) value.mailPinnedMessageIds = [];
+  if (!Array.isArray(value.mailPinnedMessageIds)) throw new Error('The encrypted mail pinned-message list is invalid.');
+  value.mailPinnedMessageIds = value.mailPinnedMessageIds
+    .map(id => String(id || '').trim().toLowerCase())
+    .filter(id => /^[0-9a-f]{64}$/.test(id));
+  if (value.mailDrafts === undefined) value.mailDrafts = [];
+  if (!Array.isArray(value.mailDrafts)) throw new Error('The encrypted mail draft list is invalid.');
+  // A draft that cannot be normalised is dropped rather than allowed to
+  // break the whole wallet data file.
+  value.mailDrafts = value.mailDrafts
+    .map(draft => { try { return normalizeMailDraft(draft); } catch { return null; } })
+    .filter(Boolean);
   return value;
 }
 
@@ -897,6 +939,203 @@ function normalizePeerChatMessage(message = {}) {
   return { txid, senderAddress, content, isEncrypted: message.isEncrypted === true, timestamp, status: message.status, blockHeight };
 }
 
+function normalizeMailMessage(message = {}) {
+  const txid = String(message.txid || '').toLowerCase();
+  const messageId = String(message.messageId || '').toLowerCase();
+  const senderAddress = String(message.senderAddress || '');
+  const recipientAddress = String(message.recipientAddress || '');
+  const recipientPublicKeyHex = String(message.recipientPublicKeyHex || '').toLowerCase();
+  const senderPublicKeyHex = String(message.senderPublicKeyHex || '').toLowerCase();
+  // Attachment references describe where each encrypted attachment lives on
+  // chain. The bytes themselves are never stored locally.
+  const attachmentRefs = (Array.isArray(message.attachmentRefs) ? message.attachmentRefs : [])
+    .filter(ref => ref && typeof ref === 'object')
+    .slice(0, 10)
+    .map(ref => ({
+      name: String(ref.name || 'attachment').slice(0, 120),
+      mimeType: String(ref.mimeType || 'application/octet-stream').slice(0, 120),
+      byteLength: Math.max(0, Math.min(Number(ref.byteLength) || 0, 10 * 1024 * 1024)),
+      vout: Math.max(0, Math.min(Number(ref.vout) || 0, 100)),
+    }));
+  const subject = String(message.subject || '');
+  const body = String(message.body || '');
+  const parsedTimestamp = Date.parse(message.timestamp);
+  const blockHeight = Number(message.blockHeight || 0);
+  const direction = message.direction === 'sent' ? 'sent' : 'received';
+  const status = ['pending', 'confirmed', 'undecryptable'].includes(message.status) ? message.status : 'pending';
+  const readAt = message.readAt === null || message.readAt === undefined
+    ? null
+    : new Date(message.readAt);
+  // The THREAD ROOT is the message id of the first message in a conversation.
+  // A message that carries no thread root is its own thread's root.
+  const threadRootId = /^[0-9a-f]{64}$/.test(String(message.threadRootId || '').toLowerCase())
+    ? String(message.threadRootId).toLowerCase()
+    : messageId;
+  if (!TXID_RE.test(txid) || !/^[0-9a-f]{64}$/.test(messageId)
+    || !bsv.Address.isValid(senderAddress, 'livenet')
+    || !bsv.Address.isValid(recipientAddress, 'livenet')
+    || !Number.isFinite(parsedTimestamp)
+    || subject.length > 200 || body.length > 8000
+    || !Number.isSafeInteger(blockHeight) || blockHeight < 0
+    || (readAt !== null && !Number.isFinite(readAt.getTime()))
+    || (senderPublicKeyHex && !/^(?:02|03)[0-9a-f]{64}$/.test(senderPublicKeyHex))) {
+    throw new Error('The local mail message is invalid.');
+  }
+  return {
+    txid,
+    messageId,
+    direction,
+    senderAddress,
+    recipientAddress,
+    recipientPublicKeyHex,
+    senderPublicKeyHex,
+    attachmentCount: attachmentRefs.length,
+    attachmentRefs,
+    subject,
+    body,
+    timestamp: new Date(parsedTimestamp).toISOString(),
+    status,
+    blockHeight,
+    readAt: readAt === null ? null : readAt.toISOString(),
+    error: message.error ? String(message.error).slice(0, 300) : null,
+    threadRootId,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Drafts
+// ---------------------------------------------------------------------------
+
+// A DRAFT is unsent mail the user saved. It is LOCAL ONLY: it lives in the
+// encrypted wallet data on this device and is never broadcast, so nobody else
+// can see it and nothing is written to the chain.
+//
+// The attachment bytes are kept as base64 in the draft, because the whole
+// point of a draft is that the file is still there when the user comes back
+// to send it. That makes a draft the largest thing in the wallet data, so the
+// total is capped at the same 50 MB the mail path allows.
+const MAX_DRAFT_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const MAX_DRAFT_TOTAL_BYTES = 50 * 1024 * 1024;
+const MAX_DRAFTS = 100;
+
+function normalizeMailDraft(draft = {}) {
+  const draftId = String(draft.draftId || '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(draftId)) throw new Error('The mail draft id is invalid.');
+  const recipient = String(draft.recipient || '').trim();
+  const recipientPublicKeyHex = String(draft.recipientPublicKeyHex || '').toLowerCase();
+  const subject = String(draft.subject || '');
+  const body = String(draft.body || '');
+  const parsedTimestamp = Date.parse(draft.updatedAt);
+  if (recipient && !bsv.Address.isValid(recipient, 'livenet')) {
+    throw new Error('The mail draft recipient address is invalid.');
+  }
+  if (recipientPublicKeyHex && !/^(?:02|03)[0-9a-f]{64}$/.test(recipientPublicKeyHex)) {
+    throw new Error('The mail draft recipient key is invalid.');
+  }
+  if (subject.length > 200 || body.length > 8000) {
+    throw new Error('The mail draft is too large.');
+  }
+  if (!Number.isFinite(parsedTimestamp)) throw new Error('The mail draft timestamp is invalid.');
+
+  const attachments = (Array.isArray(draft.attachments) ? draft.attachments : [])
+    .filter(item => item && typeof item === 'object')
+    .map(item => ({
+      fileName: String(item.fileName || 'attachment').slice(0, 120),
+      mimeType: String(item.mimeType || 'application/octet-stream').slice(0, 120),
+      byteLength: Math.max(0, Math.min(Number(item.byteLength) || 0, MAX_DRAFT_ATTACHMENT_BYTES)),
+      dataBase64: String(item.dataBase64 || '').slice(0, Math.ceil(MAX_DRAFT_ATTACHMENT_BYTES * 1.4)),
+    }));
+  const totalBytes = attachments.reduce((sum, item) => sum + item.byteLength, 0);
+  if (totalBytes > MAX_DRAFT_TOTAL_BYTES) {
+    throw new Error('The draft attachments are larger than 50 MB.');
+  }
+
+  // The thread a draft belongs to. A draft started as a reply keeps the
+  // thread it was written in, so sending it later continues the discussion.
+  const threadRootId = /^[0-9a-f]{64}$/.test(String(draft.threadRootId || '').toLowerCase())
+    ? String(draft.threadRootId).toLowerCase()
+    : '';
+
+  return {
+    draftId,
+    recipient,
+    recipientPublicKeyHex,
+    subject,
+    body,
+    attachments,
+    threadRootId,
+    updatedAt: new Date(parsedTimestamp).toISOString(),
+  };
+}
+
+// Lists the user's drafts, newest first.
+async function getWalletMailDrafts(address) {
+  const data = await getWalletData(address);
+  return data.mailDrafts
+    .slice()
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+// Saves a draft, replacing any earlier draft with the same id.
+async function saveWalletMailDraft(address, draft = {}) {
+  const normalized = normalizeMailDraft(draft);
+  return updateWalletData(address, data => {
+    const index = data.mailDrafts.findIndex(row => row.draftId === normalized.draftId);
+    if (index >= 0) data.mailDrafts[index] = normalized;
+    else data.mailDrafts.push(normalized);
+    // Keep the draft list bounded.
+    data.mailDrafts = data.mailDrafts
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, MAX_DRAFTS);
+    return { draft: normalized };
+  });
+}
+
+// Deletes a draft.
+async function deleteWalletMailDraft(address, draftId) {
+  const target = String(draftId || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(target)) throw new Error('The mail draft id is invalid.');
+  return updateWalletData(address, data => {
+    const before = data.mailDrafts.length;
+    data.mailDrafts = data.mailDrafts.filter(row => row.draftId !== target);
+    if (data.mailDrafts.length === before) {
+      throw new Error('That draft is not in the local mailbox.');
+    }
+    return { draftId: target, deleted: true };
+  });
+}
+
+function normalizeMailContact(contact = {}) {
+  const address = String(contact.address || '').trim();
+  const publicKeyHex = String(contact.publicKeyHex || '').trim().toLowerCase();
+  const label = String(contact.label || '').trim();
+  if (!bsv.Address.isValid(address, 'livenet')) throw new Error('The local mail contact address is invalid.');
+  if (!/^(?:02|03)[0-9a-f]{64}$/.test(publicKeyHex)) throw new Error('The local mail contact public key is invalid.');
+  // "Trusted" is the user's own local vouch for this contact. It is NOT a
+  // cryptographic claim - nothing about the key changes - it only marks the
+  // contact as one the user has confirmed.
+  const trusted = contact.trusted === true;
+  return { address, publicKeyHex, label: label.slice(0, 60), trusted };
+}
+
+// A spam-flagged sender. The PUBLIC KEY is the identity, not the address:
+// the same key can control many addresses, and a reply must be blocked for
+// every one of them. The address is kept for display only.
+function normalizeMailSpamSender(sender = {}) {
+  const publicKeyHex = String(sender.publicKeyHex || '').trim().toLowerCase();
+  const address = String(sender.address || '').trim();
+  const label = String(sender.label || '').trim();
+  if (!/^(?:02|03)[0-9a-f]{64}$/.test(publicKeyHex)) {
+    throw new Error('The local mail spam sender public key is invalid.');
+  }
+  return {
+    publicKeyHex,
+    address: address.slice(0, 64),
+    label: label.slice(0, 60),
+    markedAt: new Date().toISOString(),
+  };
+}
+
 function normalizeAdminWalletTransaction(record = {}) {
   const txid = String(record.txid || '').toLowerCase();
   const rawTxHex = typeof record.rawTxHex === 'string' && record.rawTxHex
@@ -988,9 +1227,13 @@ async function saveWalletPeerChatSnapshot(address, snapshot = {}) {
         ? previous
         : { ...previous, ...message });
     }
+    // The chat feed is NOT capped. A conversation that quietly forgets what
+    // was said five hundred messages ago is not a conversation. The rows are
+    // merged by txid, so the list grows with the HISTORY rather than with
+    // the number of syncs - a re-sync of a known message updates it in
+    // place instead of appending a duplicate.
     data.peerChatMessages = [...byTxid.values()]
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      .slice(-500);
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     if (snapshot.lastScannedTxid !== undefined) data.peerChatLastScannedTxid = lastScannedTxid;
     if (snapshot.syncedAt !== undefined) data.peerChatSyncedAt = syncedAt;
     return {
@@ -998,6 +1241,239 @@ async function saveWalletPeerChatSnapshot(address, snapshot = {}) {
       lastScannedTxid: data.peerChatLastScannedTxid,
       syncedAt: data.peerChatSyncedAt,
     };
+  });
+}
+
+async function getWalletMailSnapshot(address) {
+  const data = await getWalletData(address);
+  return {
+    messages: data.mailMessages.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+    syncedAt: data.mailSyncedAt,
+    // The spam-flagged senders and the locally deleted message ids are part
+    // of the mailbox state, so they travel with the snapshot.
+    spamSenders: data.mailSpamSenders.slice(),
+    deletedMessageIds: data.mailDeletedMessageIds.slice(),
+    // The pinned message ids, newest pin first.
+    pinnedMessageIds: data.mailPinnedMessageIds.slice(),
+    // The activity rows are the piggyback source: the activity sync already
+    // fetches transaction details for every transaction in the wallet's own
+    // address history, and those details carry the mail OP_RETURN payload.
+    // The attachment refs must be carried through too, or a received mail
+    // would show up with no attachments.
+    activityRows: data.activities
+      .filter(row => row?.details?.mailPayload)
+      .map(row => ({
+        txid: row.txid,
+        blockHeight: Number(row.blockHeight || 0),
+        details: {
+          mailPayload: row.details.mailPayload,
+          mailAttachments: row.details.mailAttachments || [],
+        },
+      })),
+  };
+}
+
+async function saveWalletMailSnapshot(address, snapshot = {}) {
+  if (snapshot.messages !== undefined && !Array.isArray(snapshot.messages)) {
+    throw new Error('The local mail message list is invalid.');
+  }
+  const messages = (snapshot.messages || []).map(normalizeMailMessage);
+  let syncedAt;
+  if (snapshot.syncedAt !== undefined) {
+    syncedAt = new Date(snapshot.syncedAt).toISOString();
+  }
+  return updateWalletData(address, data => {
+    const byMessageId = new Map(data.mailMessages.map(row => {
+      const normalized = normalizeMailMessage(row);
+      return [normalized.messageId, normalized];
+    }));
+    // A deleted message must stay deleted. The sync re-discovers every mail
+    // payload on chain, so without this filter a deleted message would come
+    // straight back on the next sync.
+    const deleted = new Set(data.mailDeletedMessageIds);
+    // Messages the sync has decided are NOT this wallet's mail. The snapshot
+    // MERGES into the stored list, so without this the merge would put back
+    // anything the sync dropped - and a wallet that was merely PAID a fee for
+    // someone else's mail would keep that mail in its inbox forever.
+    const removed = new Set((snapshot.removedMessageIds || []).map(id => String(id).toLowerCase()));
+    for (const message of messages) {
+      if (deleted.has(message.messageId)) continue;
+      if (removed.has(message.messageId)) continue;
+      const previous = byMessageId.get(message.messageId);
+      // A confirmed message must not be downgraded back to pending by a later
+      // sync, and a decrypted message must not be replaced by an undecryptable
+      // placeholder.
+      const keepConfirmed = previous?.status === 'confirmed' && message.status === 'pending';
+      const keepDecrypted = previous?.status === 'confirmed' && message.status === 'undecryptable';
+      byMessageId.set(message.messageId, keepConfirmed || keepDecrypted ? previous : { ...previous, ...message });
+    }
+    // Drop the removed ones, and any that are already tombstoned.
+    for (const messageId of removed) byMessageId.delete(messageId);
+    // The mailbox is NOT capped. The rows are merged by message id, so it
+    // grows with the MAIL rather than with the number of syncs.
+    data.mailMessages = [...byMessageId.values()]
+      .filter(row => !deleted.has(row.messageId))
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    if (snapshot.syncedAt !== undefined) data.mailSyncedAt = syncedAt;
+    return {
+      messages: data.mailMessages.slice(),
+      syncedAt: data.mailSyncedAt,
+    };
+  });
+}
+
+// Deletes a message from the user's LOCAL mailbox record.
+//
+// The message is still on chain - that is permanent and cannot be undone.
+// This only removes it from this wallet's encrypted mailbox so it no longer
+// appears in the inbox, and records the deletion so a later sync does not
+// bring it back.
+async function deleteMailMessage(address, messageId) {
+  const target = String(messageId || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(target)) throw new Error('The mail message id is invalid.');
+  return updateWalletData(address, data => {
+    const before = data.mailMessages.length;
+    data.mailMessages = data.mailMessages.filter(row => row.messageId !== target);
+    if (data.mailMessages.length === before) {
+      throw new Error('That mail message is not in the local mailbox.');
+    }
+    if (!data.mailDeletedMessageIds.includes(target)) {
+      data.mailDeletedMessageIds.push(target);
+    }
+    // The tombstone list is NOT bounded either. A tombstone only has to
+    // outlive the message it refers to, and the mailbox is no longer capped,
+    // so dropping tombstones would let a deleted message come back.
+    data.mailDeletedMessageIds = data.mailDeletedMessageIds;
+    return { messageId: target, deleted: true };
+  });
+}
+
+// Marks or unmarks a contact as TRUSTED.
+//
+// "Trusted" is the user's own local vouch for a contact: it says "I have
+// confirmed this is really them". It is NOT a cryptographic claim - the key
+// never changes and nothing is published - it is a local marker that the UI
+// shows as a verified badge.
+//
+// The trust is stored per PUBLIC KEY, so it carries over to every address
+// that key controls, and to every mail row from that sender.
+async function setMailContactTrusted(address, publicKeyHex, trusted = true) {
+  const key = String(publicKeyHex || '').trim().toLowerCase();
+  if (!/^(?:02|03)[0-9a-f]{64}$/.test(key)) {
+    throw new Error('The contact public key is invalid.');
+  }
+  return updateWalletData(address, data => {
+    const contact = data.mailContacts.find(row => row.publicKeyHex === key);
+    if (!contact) throw new Error('That contact is not in the local contact list.');
+    contact.trusted = trusted === true;
+    return { address: contact.address, publicKeyHex: key, trusted: contact.trusted };
+  });
+}
+
+// The trusted contact public keys, as a Set for a cheap lookup.
+async function getWalletMailTrustedKeys(address) {
+  const data = await getWalletData(address);
+  return new Set(data.mailContacts.filter(row => row.trusted).map(row => row.publicKeyHex));
+}
+
+// Flags a sender's public key as spam.
+//
+// The PUBLIC KEY is the identity, not the address: the same key controls
+// every address derived from it, so flagging the key stops all of them. The
+// address is kept only for display.
+async function markMailSenderSpam(address, { publicKeyHex, senderAddress, label } = {}) {
+  const key = String(publicKeyHex || '').trim().toLowerCase();
+  if (!/^(?:02|03)[0-9a-f]{64}$/.test(key)) {
+    throw new Error('The spam sender public key is invalid.');
+  }
+  return updateWalletData(address, data => {
+    const sender = normalizeMailSpamSender({ publicKeyHex: key, address: senderAddress, label });
+    const existing = data.mailSpamSenders.find(row => row.publicKeyHex === key);
+    if (!existing) {
+      data.mailSpamSenders.push(sender);
+    } else {
+      existing.address = sender.address || existing.address;
+      existing.label = sender.label || existing.label;
+    }
+    return { sender: existing || sender };
+  });
+}
+
+// Removes a spam flag and restores every message from that sender.
+//
+// The restoration is a local one: the messages were never destroyed, only
+// filed under Spam, so unmarking puts them back where they belong.
+async function unmarkMailSenderSpam(address, publicKeyHex) {
+  const key = String(publicKeyHex || '').trim().toLowerCase();
+  if (!/^(?:02|03)[0-9a-f]{64}$/.test(key)) {
+    throw new Error('The spam sender public key is invalid.');
+  }
+  return updateWalletData(address, data => {
+    const before = data.mailSpamSenders.length;
+    data.mailSpamSenders = data.mailSpamSenders.filter(row => row.publicKeyHex !== key);
+    if (data.mailSpamSenders.length === before) {
+      throw new Error('That sender is not marked as spam.');
+    }
+    return { publicKeyHex: key, removed: true };
+  });
+}
+
+// The spam-flagged sender public keys, as a Set for a cheap lookup.
+async function getWalletMailSpamKeys(address) {
+  const data = await getWalletData(address);
+  return new Set(data.mailSpamSenders.map(row => row.publicKeyHex));
+}
+
+// Pins or unpins a message.
+//
+// A pinned message is kept at the TOP of its list, so it cannot be scrolled
+// away from. The pin is local: it reorders the mailbox on this device and
+// changes nothing on chain.
+async function setMailPinned(address, messageId, pinned = true) {
+  const target = String(messageId || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(target)) throw new Error('The mail message id is invalid.');
+  return updateWalletData(address, data => {
+    if (pinned) {
+      if (!data.mailPinnedMessageIds.includes(target)) {
+        // Newest pin first, so the most recently pinned message leads.
+        data.mailPinnedMessageIds.unshift(target);
+      }
+    } else {
+      data.mailPinnedMessageIds = data.mailPinnedMessageIds.filter(id => id !== target);
+    }
+    data.mailPinnedMessageIds = data.mailPinnedMessageIds.slice(0, 200);
+    return { messageId: target, pinned: pinned === true };
+  });
+}
+
+async function getWalletMailContacts(address) {
+  const data = await getWalletData(address);
+  return data.mailContacts.slice();
+}
+
+// Marks a mail message as read (or unread). The read state is local to this
+// wallet and is stored in the encrypted wallet-data file.
+async function markMailRead(address, messageId, read = true) {
+  const target = String(messageId || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(target)) throw new Error('The mail message id is invalid.');
+  const readAt = read ? new Date().toISOString() : null;
+  return updateWalletData(address, data => {
+    const message = data.mailMessages.find(row => row.messageId === target);
+    if (!message) throw new Error('That mail message is not in the local mailbox.');
+    message.readAt = readAt;
+    return { messageId: target, readAt };
+  });
+}
+
+async function saveWalletMailContacts(address, contacts = []) {
+  if (!Array.isArray(contacts)) throw new Error('The local mail contact list is invalid.');
+  const normalized = contacts.map(normalizeMailContact);
+  return updateWalletData(address, data => {
+    const byAddress = new Map();
+    for (const contact of normalized) byAddress.set(contact.address, contact);
+    data.mailContacts = [...byAddress.values()]
+      .sort((a, b) => a.label.localeCompare(b.label) || a.address.localeCompare(b.address));
+    return data.mailContacts.slice();
   });
 }
 
@@ -1057,17 +1533,23 @@ async function saveWalletAdminIndexSnapshot(address, snapshot = {}) {
       return [normalized.txid, normalized];
     }));
     for (const transaction of transactions) byTxid.set(transaction.txid, transaction);
+    // The admin index is NOT capped. The rows are merged by txid, so the
+    // index grows with the CHAIN HISTORY rather than with the number of
+    // syncs - a peer who makes transactions for years keeps every one of
+    // them. A cap here would silently drop the oldest history, which is
+    // exactly the record a long-lived peer needs.
     data.adminWalletTransactions = [...byTxid.values()]
-      .sort((a, b) => b.blockHeight - a.blockHeight || b.blockTime - a.blockTime)
-      .slice(0, MAX_ADMIN_INDEX_TRANSACTIONS);
+      .sort((a, b) => b.blockHeight - a.blockHeight || b.blockTime - a.blockTime);
     if (snapshot.pendingTransactions !== undefined) {
       const confirmedTxids = new Set(data.adminWalletTransactions.map(row => row.txid));
       const pendingByTxid = new Map();
       for (const transaction of pendingTransactions) {
         if (!confirmedTxids.has(transaction.txid)) pendingByTxid.set(transaction.txid, transaction);
       }
-      data.adminWalletPendingTransactions = [...pendingByTxid.values()]
-        .slice(0, MAX_ADMIN_INDEX_PENDING_TRANSACTIONS);
+      // The pending index is not capped either. A pending transaction that
+      // is never mined must stay visible until it resolves - dropping the
+      // oldest ones would hide a transaction that is still in flight.
+      data.adminWalletPendingTransactions = [...pendingByTxid.values()];
     } else {
       const confirmedTxids = new Set(transactions.map(row => row.txid));
       data.adminWalletPendingTransactions = data.adminWalletPendingTransactions
@@ -1273,6 +1755,21 @@ module.exports = {
   setWalletTransactionStatusCheckedAt,
   getWalletPeerChatSnapshot,
   saveWalletPeerChatSnapshot,
+  getWalletMailSnapshot,
+  saveWalletMailSnapshot,
+  getWalletMailContacts,
+  saveWalletMailContacts,
+  getWalletMailDrafts,
+  saveWalletMailDraft,
+  deleteWalletMailDraft,
+  markMailRead,
+  deleteMailMessage,
+  markMailSenderSpam,
+  unmarkMailSenderSpam,
+  getWalletMailSpamKeys,
+  setMailPinned,
+  setMailContactTrusted,
+  getWalletMailTrustedKeys,
   getWalletAdminIndexSnapshot,
   saveWalletAdminIndexSnapshot,
   saveWalletChainSnapshot,

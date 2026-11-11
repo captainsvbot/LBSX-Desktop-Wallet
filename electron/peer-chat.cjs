@@ -5,7 +5,6 @@ const { getAdminWalletIndex, syncAdminWalletIndex } = require('./admin-wallet-in
 const { getWalletPeerChatSnapshot, saveWalletPeerChatSnapshot } = require('./wallet-data.cjs');
 const { decryptPeerChatContent } = require('./peer-chat-crypto.cjs');
 
-const MAX_MESSAGES = 150;
 const ADMIN_FEE_SATS = 1000;
 const TXID_RE = /^[0-9a-f]{64}$/i;
 
@@ -99,8 +98,13 @@ async function syncPeerChat(address, { onProgress = null } = {}) {
     );
     if (message) messages.push(message);
   }
+  // The chat feed is NOT capped. It is a conversation history, and a
+  // conversation that quietly forgets what was said three hundred messages
+  // ago is not a conversation - it is a feed. The messages are merged by
+  // txid, so the list grows with the history rather than with the number of
+  // syncs.
   const saved = await saveWalletPeerChatSnapshot(address, {
-    messages: messages.slice(-MAX_MESSAGES),
+    messages,
     lastScannedTxid: index.lastScannedTxid,
     syncedAt: index.syncedAt || prior.syncedAt || new Date().toISOString(),
   });

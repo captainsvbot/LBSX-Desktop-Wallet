@@ -1,6 +1,6 @@
 {
   "name": "lbsx-desktop-wallet",
-  "version": "2.1.00",
+  "version": "2.1.20",
   "private": true,
   "type": "module",
   "description": "Local-first BSV and BSV-21 desktop wallet with SPV validation and on-chain trading",
@@ -41,7 +41,39 @@
     "test:wallet-data": "node scripts/wallet-data-smoke.mjs",
     "test:token-mint": "node scripts/token-mint-smoke.mjs",
     "test:packaged": "node scripts/packaged-smoke.mjs",
-    "start": "electron ."
+    "start": "electron .",
+    "test:mail-crypto": "node scripts/mail-crypto-smoke.mjs",
+    "test:mail-tx": "node scripts/mail-transaction-smoke.mjs",
+    "test:mail-cross-runtime": "node scripts/mail-cross-runtime-smoke.mjs",
+    "test:mail-public-attack": "node scripts/mail-public-attack.cjs",
+    "test:mail-key-exchange": "node scripts/mail-key-exchange-demo.cjs",
+    "test:mail-source-attack": "node scripts/mail-source-code-attack.cjs",
+    "test:mail-known-plaintext": "node scripts/mail-known-plaintext-analysis.cjs",
+    "test:mail-address-derivation": "node scripts/mail-address-derivation-smoke.mjs",
+    "test:mail-search": "node scripts/mail-search-smoke.mjs",
+    "test:mail-reply-key": "node scripts/mail-reply-key-smoke.mjs",
+    "test:mail-attachments": "node scripts/mail-attachment-smoke.mjs",
+    "test:mail-attachment-tx": "node scripts/mail-attachment-transaction-smoke.mjs",
+    "test:mail-attachment-receive": "node scripts/mail-attachment-receive-check.mjs",
+    "test:mail-token-exclusion": "node scripts/mail-token-exclusion-smoke.mjs",
+    "test:mail-attachment-vout": "node scripts/mail-attachment-vout-smoke.mjs",
+    "test:mail-attachment-api-shape": "node scripts/mail-attachment-api-shape-smoke.mjs",
+    "test:mail-attachment-inbox": "node scripts/mail-attachment-inbox-discovery.mjs",
+    "test:mail-public-key-resolver": "node scripts/mail-public-key-resolver-smoke.mjs",
+    "test:mail-attachment-save-name": "node scripts/mail-attachment-save-name-smoke.mjs",
+    "test:mail-virustotal": "node scripts/mail-virustotal-smoke.mjs",
+    "test:mail-spam": "node scripts/mail-spam-delete-smoke.mjs",
+    "test:mail-spam-persistence": "node scripts/mail-spam-persistence-smoke.mjs",
+    "test:mail-pending-status": "node scripts/mail-pending-status-smoke.mjs",
+    "test:mail-pin": "node scripts/mail-pin-smoke.mjs",
+    "test:mail-trust": "node scripts/mail-trust-smoke.mjs",
+    "test:mail-thread-draft": "node scripts/mail-thread-draft-smoke.mjs",
+    "test:mail-recipient-check": "node scripts/mail-recipient-check-smoke.mjs",
+    "test:mail-format": "node scripts/mail-format-smoke.mjs",
+    "test:mail-link-scheme": "node scripts/mail-link-scheme-smoke.mjs",
+    "test:mail-compose-roundtrip": "node scripts/mail-compose-roundtrip-smoke.mjs",
+    "test:mail-no-preview": "node scripts/mail-attachment-no-preview-smoke.mjs",
+    "test:mail-attachment-no-preview": "node scripts/mail-attachment-no-preview-smoke.mjs"
   },
   "dependencies": {
     "@1sat/templates": "^0.0.44",
@@ -73,7 +105,7 @@
       "package.json"
     ],
     "directories": {
-      "output": "release-windows-2.1.00"
+      "output": "release-windows-2.1.20-Email"
     },
     "asar": true,
     "win": {
@@ -88,13 +120,19 @@
       ]
     },
     "nsis": {
-      "artifactName": "${productName} Setup 2.1.00.${ext}",
+      "artifactName": "${productName} Setup 2.1.20.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "artifactName": "${productName} Setup 2.1.20.${ext}"
+  },
+  "allowScripts": {
+    "electron@39.8.10": true,
+    "esbuild@0.25.12": true,
+    "electron-winstaller@5.4.0": true
   }
 }

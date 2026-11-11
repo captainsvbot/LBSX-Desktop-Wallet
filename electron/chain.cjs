@@ -408,6 +408,184 @@ function tokenOutput(output) {
   };
 }
 
+// Recovers a compressed public key from a P2PKH script_sig. A P2PKH input
+// publishes the spender's public key, so it can be read from the chain. This
+// is how a received mail learns which key a reply must be encrypted to.
+// Reads the attachment outputs carried by a mail transaction. Implemented
+// locally so chain.cjs does not depend on the mail module.
+function findAttachmentOutputs(transaction, messageId) {
+  const found = [];
+  for (const output of transaction?.outputs || []) {
+    const script = output?.script_pubkey ?? output?.scriptPubKey ?? output?.script;
+    const pushes = readScriptPushes(script);
+    if (!pushes || pushes.length !== 10) continue;
+    const text = index => pushes[index].toString('utf8');
+    if (text(0) !== 'LBSX' || text(1) !== 'v2' || text(2) !== 'mail_attachment') continue;
+    if (messageId && text(3).toLowerCase() !== String(messageId).toLowerCase()) continue;
+    const byteLength = Number(text(6));
+    if (!Number.isSafeInteger(byteLength) || byteLength < 0) continue;
+    if (pushes[7].length !== 12 || pushes[8].length !== 16) continue;
+    if (pushes[9].length !== byteLength) continue;
+    found.push({
+      messageId: text(3).toLowerCase(),
+      fileName: text(4),
+      mimeType: text(5),
+      byteLength,
+      vout: output.index ?? found.length,
+    });
+  }
+  return found;
+}
+
+// Reads the raw pushes that follow an OP_RETURN marker.
+//
+// The API returns each output's script as a HEX STRING under script_pubkey,
+// so the hex is converted to a parsed script first. A script that is already
+// parsed (a bsv Script object) is accepted as-is.
+function readScriptPushes(script) {
+  let parsed = script;
+  if (typeof script === 'string') {
+    const hex = script.trim();
+    if (!/^(?:[0-9a-f]{2})+$/i.test(hex)) return null;
+    try {
+      parsed = bsv.Script.fromHex(hex);
+    } catch {
+      return null;
+    }
+  }
+  const chunks = parsed?.chunks || [];
+  const marker = chunks.findIndex(chunk => chunk.opcodenum === 0x6a);
+  if (marker < 0) return null;
+  const pushes = [];
+  for (const chunk of chunks.slice(marker + 1)) {
+    if (!chunk.buf) return null;
+    pushes.push(Buffer.from(chunk.buf));
+  }
+  return pushes;
+}
+
+// Reads the compressed public key out of a P2PKH script_sig.
+//
+// The unlocking script is <signature> <compressed public key>. The key is
+// pushed with a direct 33-byte push, but the DER signature before it varies
+// in length, so the key's push opcode is not always 0x21. The script is
+// therefore parsed STRUCTURALLY and the last 33-byte push is taken, rather
+// than string-matching a fixed "2102" marker.
+function publicKeyFromScriptSig(scriptSig) {
+  const hex = String(scriptSig || '').trim().toLowerCase();
+  if (!/^(?:[0-9a-f]{2})+$/.test(hex)) return '';
+  const bytes = Buffer.from(hex, 'hex');
+  let offset = 0;
+  const pushes = [];
+  while (offset < bytes.length) {
+    const opcode = bytes[offset];
+    offset += 1;
+    let length = null;
+    if (opcode <= 0x4b) {
+      length = opcode;
+    } else if (opcode === 0x4c) {
+      if (offset + 1 > bytes.length) break;
+      length = bytes[offset];
+      offset += 1;
+    } else if (opcode === 0x4d) {
+      if (offset + 2 > bytes.length) break;
+      length = bytes.readUInt16LE(offset);
+      offset += 2;
+    } else if (opcode === 0x4e) {
+      if (offset + 4 > bytes.length) break;
+      length = bytes.readUInt32LE(offset);
+      offset += 4;
+    } else {
+      continue;
+    }
+    if (length === null || offset + length > bytes.length) break;
+    pushes.push(bytes.subarray(offset, offset + length));
+    offset += length;
+  }
+  for (let index = pushes.length - 1; index >= 0; index -= 1) {
+    const push = pushes[index];
+    if (push.length !== 33) continue;
+    if (push[0] !== 0x02 && push[0] !== 0x03) continue;
+    return push.toString('hex');
+  }
+  return '';
+}
+
+function senderPublicKeyFromInputs(inputs, senderAddress) {
+  for (const input of Array.isArray(inputs) ? inputs : []) {
+    const address = input?.address
+      || (Array.isArray(input?.addresses) ? input.addresses[0] : null);
+    if (String(address || '').toLowerCase() !== String(senderAddress || '').toLowerCase()) continue;
+    const publicKeyHex = publicKeyFromScriptSig(input?.script_sig ?? input?.scriptSig);
+    if (publicKeyHex) return publicKeyHex;
+  }
+  return '';
+}
+
+// Detects an encrypted-mail OP_RETURN payload in a transaction's outputs. The
+// activity sync already fetches transaction details for every transaction in the
+// wallet's own address history, so carrying the mail payload here lets the mail
+// feature reuse those lookups instead of repeating them.
+//
+// Each OP_RETURN push is a separate script chunk, so the payload is read by
+// collecting the pushes that follow the OP_RETURN marker.
+function mailPayloadFromOutputs(outputs, details) {
+  for (const output of outputs) {
+    const scriptHex = String(output?.script_pubkey ?? output?.scriptPubKey ?? '');
+    if (!/^(?:[0-9a-f]{2})+$/i.test(scriptHex)) continue;
+    try {
+      const chunks = bsv.Script.fromHex(scriptHex).chunks;
+      const markerIndex = chunks.findIndex(chunk => chunk.opcodenum === 0x6a);
+      if (markerIndex < 0) continue;
+      const fields = [];
+      for (const chunk of chunks.slice(markerIndex + 1)) {
+        if (!chunk.buf) return null;
+        fields.push(Buffer.from(chunk.buf).toString('utf8'));
+      }
+      if (fields.length !== 8) continue;
+      if (fields[0] !== 'LBSX' || fields[1] !== 'v2' || fields[2] !== 'mail') continue;
+      if (!/^[0-9a-f]{64}$/.test(fields[5])) continue;
+      if (!Number.isFinite(Date.parse(fields[6]))) continue;
+      let envelope;
+      try {
+        envelope = JSON.parse(fields[7]);
+      } catch {
+        continue;
+      }
+      if (!envelope || typeof envelope !== 'object'
+        || !envelope.e || !envelope.i || !envelope.t || !envelope.c) continue;
+      // Recover the sender's public key from the input that funded the mail, so
+      // a reply can be encrypted back to the same party. The key is bound to
+      // the spender, not to the payload's claimed sender field.
+      const senderPublicKeyHex = senderPublicKeyFromInputs(details?.inputs, fields[3]);
+      return {
+        sender: String(fields[3] || ''),
+        recipient: String(fields[4] || ''),
+        messageId: String(fields[5]).toLowerCase(),
+        timestamp: new Date(fields[6]).toISOString(),
+        envelope,
+        senderPublicKeyHex,
+      };
+    } catch {
+      /* Ignore outputs that are not mail payloads. */
+    }
+  }
+  return null;
+}
+
+// A cached activity row that carries a mail payload but no attachment list
+// was built before attachments existed, or before the attachment outputs were
+// discovered. Such a row must be refreshed from the chain, otherwise the
+// mail would permanently show no attachments.
+//
+// The row is only stale if the transaction actually HAS attachment outputs,
+// which is only knowable by re-reading the transaction - so this returns true
+// for any mail row without the field, and the refresh settles it.
+function needsMailAttachmentRefresh(existing) {
+  if (!existing?.details?.mailPayload) return false;
+  return !Array.isArray(existing.details.mailAttachments);
+}
+
 function summarizeWalletTransaction(tx, address, ref, existing) {
   const body = tx?.result || tx?.transaction || tx;
   const inputs = Array.isArray(body?.inputs) ? body.inputs : [];
@@ -447,6 +625,23 @@ function summarizeWalletTransaction(tx, address, ref, existing) {
         : receivedTokens.length ? 'token-receive' : 'wallet-transaction');
   const details = { ...(existing?.details || {}) };
   delete details.lookupError;
+  // Carry an encrypted-mail payload through on the activity row. The mail
+  // feature reads these rows instead of repeating the transaction-detail
+  // lookups the activity sync already performs.
+  const mailPayload = mailPayloadFromOutputs(outputs, body);
+  if (mailPayload) details.mailPayload = mailPayload;
+  // Carry any encrypted attachment outputs through as well, so the mail
+  // feature can list them without repeating the transaction lookup.
+  if (mailPayload) {
+    const attachmentRefs = findAttachmentOutputs({ outputs }, mailPayload.messageId)
+      .map(attachment => ({
+        name: attachment.fileName,
+        mimeType: attachment.mimeType,
+        byteLength: attachment.byteLength,
+        vout: attachment.vout,
+      }));
+    if (attachmentRefs.length) details.mailAttachments = attachmentRefs;
+  }
   return {
     txid,
     type,
@@ -695,7 +890,7 @@ async function syncWalletActivity(address, { onProgress = null } = {}) {
       processedTxids.add(ref.txid);
       continue;
     }
-    if (existing && !existing.details?.lookupError) {
+    if (existing && !existing.details?.lookupError && !needsMailAttachmentRefresh(existing)) {
       activities.push(summarizeWalletTransaction({}, address, ref, existing));
       processedTxids.add(ref.txid);
       continue;
