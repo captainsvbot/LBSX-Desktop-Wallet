@@ -5,12 +5,14 @@ computer, balances are verified against your own SPV header chain, and BSV-21
 tokens, locks, peer trading, peer chat, and end-to-end encrypted email are
 built and signed locally.
 
-**[⬇ Download for Windows](https://github.com/captainsvbot/LBSX-Desktop-Wallet/releases/latest)**
+**[⬇ Download v2.1.20 for Windows](https://github.com/captainsvbot/LBSX-Desktop-Wallet/releases/tag/v2.1.20)**
 · [Install guide](#download-and-install) · [BananaBlocks API key](#bananablocks-api-key)
 · [Disclaimer](#disclaimer-no-warranty-no-liability)
 
 > **Version 2.1.20** · MIT licensed · Windows x64
 > · Electron 39 + React 18 + Vite 6
+> · Latest release: [`v2.1.20`](https://github.com/captainsvbot/LBSX-Desktop-Wallet/releases/tag/v2.1.20)
+> · Always the newest: [`releases/latest`](https://github.com/captainsvbot/LBSX-Desktop-Wallet/releases/latest)
 
 > ## ⚠️ Read this first
 >
@@ -1352,7 +1354,9 @@ The ledger shows 6 rows per page and clearly labels partial history as
 
 **Most people just need the installer. You do not need Node.js or to build anything.**
 
-1. Open the **[latest release](https://github.com/captainsvbot/LBSX-Desktop-Wallet/releases/latest)**.
+1. Open the **[latest release](https://github.com/captainsvbot/LBSX-Desktop-Wallet/releases/latest)**
+   — currently **v2.1.20**, at
+   [releases/tag/v2.1.20](https://github.com/captainsvbot/LBSX-Desktop-Wallet/releases/tag/v2.1.20).
 2. Under **Assets**, download **`LBSX Desktop Wallet Setup <version>.exe`**.
    (The `.blockmap` file is not needed.)
 3. Run the installer. Windows SmartScreen may show an "unknown publisher"
