@@ -70,6 +70,7 @@
     "test:mail-thread-draft": "node scripts/mail-thread-draft-smoke.mjs",
     "test:mail-recipient-check": "node scripts/mail-recipient-check-smoke.mjs",
     "test:mail-format": "node scripts/mail-format-smoke.mjs",
+    "test:mail-link-scheme": "node scripts/mail-link-scheme-smoke.mjs",
     "test:mail-compose-roundtrip": "node scripts/mail-compose-roundtrip-smoke.mjs",
     "test:mail-no-preview": "node scripts/mail-attachment-no-preview-smoke.mjs",
     "test:mail-attachment-no-preview": "node scripts/mail-attachment-no-preview-smoke.mjs"

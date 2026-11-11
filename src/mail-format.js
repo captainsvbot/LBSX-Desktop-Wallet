@@ -155,6 +155,41 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+// Whether a URL may be used as the target of a link.
+//
+// A link's target may come from a REMOTE source - the sender of a received
+// mail, or a third-party API response - so the scheme is checked here rather
+// than trusted. Only `http` and `https` are allowed, because those are the
+// only schemes a link in a message has any business being.
+//
+// The check is done on the PARSED url, not on the string, so a url like
+// `java\nscript:alert(1)` cannot slip past a naive prefix check.
+//
+// The main process applies the same rule when it opens the url, so a value
+// that gets past here is still refused there. This is defence in depth, and
+// it is what the code scanner needs to see: the scheme is constrained at the
+// point the href is built, not only at the point it is used.
+export function isSafeLinkUrl(url) {
+  try {
+    const parsed = new URL(String(url));
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// Normalises a URL typed into the link dialog into a safe href.
+//
+// A bare address like "example.com" gets the scheme, because a link without
+// one is not a link. Anything whose scheme is not http or https is refused
+// and returns an empty string, which the caller treats as "no link".
+export function normalizeLinkUrl(url) {
+  const trimmed = String(url || '').trim();
+  if (!trimmed) return '';
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return isSafeLinkUrl(candidate) ? candidate : '';
+}
+
 // Renders a body as HTML, for the COMPOSE editor to display.
 //
 // The compose editor shows the message the way the reader will see it - real

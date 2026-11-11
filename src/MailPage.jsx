@@ -11,7 +11,7 @@ import {
   searchMessages, sortMessages, groupByDay, groupThreads, formatDayLabel, formatRowTime,
 } from './mail-search.js';
 import './MailPage.css';
-import { renderMailBody } from './mail-format.js';
+import { renderMailBody, isSafeLinkUrl, normalizeLinkUrl } from './mail-format.js';
 import { mailBodyToHtml } from './mail-format.js';
 import { htmlToMailBody, rangeFromOffsets, globalOffsetsFromRange } from './mail-compose.js';
 
@@ -615,9 +615,11 @@ function ComposePanel({ contacts, ownCard, onSend, onSaveDraft, sending, onCance
     const url = linkUrl.trim();
     if (!label) { setLinkError('Give the link some text.'); return; }
     if (!url) { setLinkError('Give the link an address.'); return; }
-    // A bare address like "example.com" gets the scheme, because a link
-    // without one is not a link.
-    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    // The URL is normalised and its SCHEME is checked. Only http and https
+    // are allowed - a `javascript:` or `file:` url is refused here rather
+    // than being written into the message.
+    const href = normalizeLinkUrl(url);
+    if (!href) { setLinkError('That address is not a web address.'); return; }
     editor.focus();
 
     // CHANGING a link that was clicked. The address and the display text of
@@ -778,7 +780,13 @@ function ComposePanel({ contacts, ownCard, onSend, onSaveDraft, sending, onCance
           thing Gmail does when a link in a draft is clicked. */}
       {activeLink && <div className="ml-link-bar">
         <span className="ml-link-bar-label">Go to link:</span>
-        <a className="ml-link-bar-url" href={activeLink.href} target="_blank" rel="noreferrer" onClick={event => event.preventDefault()}>
+        <a
+          className="ml-link-bar-url"
+          href={isSafeLinkUrl(activeLink.href) ? activeLink.href : undefined}
+          target="_blank"
+          rel="noreferrer"
+          onClick={event => event.preventDefault()}
+        >
           {activeLink.href}
         </a>
         <button type="button" className="ml-link-bar-action" onClick={changeActiveLink}>Change</button>
@@ -1126,7 +1134,9 @@ function AttachmentList({ message }) {
                   {scan.names.length > 4 ? ` · +${scan.names.length - 4} more` : ''}
                 </span>
               )}
-              {scan.permalink && (
+              {/* The permalink comes from a third-party API response, so its
+                  scheme is checked before it is put into the DOM. */}
+              {scan.permalink && isSafeLinkUrl(scan.permalink) && (
                 <a className="ml-scan-link" href={scan.permalink} target="_blank" rel="noreferrer noopener">
                   VirusTotal report
                 </a>
@@ -1182,7 +1192,15 @@ function MailBody({ text }) {
             {parts.map((part, partIndex) => {
               if (part.type === 'text') return <span key={partIndex}>{part.text}</span>;
               if (part.type === 'code') return <code key={partIndex} className="ml-body-code">{part.text}</code>;
-              if (part.type === 'link') return <a key={partIndex} className="ml-body-link" href={part.href} target="_blank" rel="noreferrer">{part.text}</a>;
+              if (part.type === 'link') {
+                // A link's target comes from the SENDER of the mail, so its
+                // scheme is checked before it reaches the DOM. Only http and
+                // https are rendered as links; anything else is shown as
+                // plain text, because a link that cannot be opened safely is
+                // not a link.
+                if (!isSafeLinkUrl(part.href)) return <span key={partIndex}>{part.text}</span>;
+                return <a key={partIndex} className="ml-body-link" href={part.href} target="_blank" rel="noreferrer">{part.text}</a>;
+              }
               if (part.type === 'bold') return <strong key={partIndex}>{part.text}</strong>;
               if (part.type === 'italic') return <em key={partIndex}>{part.text}</em>;
               if (part.type === 'strike') return <s key={partIndex}>{part.text}</s>;
@@ -1196,7 +1214,12 @@ function MailBody({ text }) {
         {block.parts.map((part, partIndex) => {
           if (part.type === 'text') return <span key={partIndex}>{part.text}</span>;
           if (part.type === 'code') return <code key={partIndex} className="ml-body-code">{part.text}</code>;
-          if (part.type === 'link') return <a key={partIndex} className="ml-body-link" href={part.href} target="_blank" rel="noreferrer">{part.text}</a>;
+          if (part.type === 'link') {
+            // The scheme is checked here for the same reason as above - the
+            // target comes from the sender of the mail.
+            if (!isSafeLinkUrl(part.href)) return <span key={partIndex}>{part.text}</span>;
+            return <a key={partIndex} className="ml-body-link" href={part.href} target="_blank" rel="noreferrer">{part.text}</a>;
+          }
           if (part.type === 'bold') return <strong key={partIndex}>{part.text}</strong>;
           if (part.type === 'italic') return <em key={partIndex}>{part.text}</em>;
           if (part.type === 'strike') return <s key={partIndex}>{part.text}</s>;
