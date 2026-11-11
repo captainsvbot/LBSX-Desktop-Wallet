@@ -43,3 +43,7 @@ mainnet.headers
 trading-chain-cache.json
 token-locks.json
 bananablocks-api-key.json
+
+# Local scratch
+_asar_rel/
+_testlist.txt
