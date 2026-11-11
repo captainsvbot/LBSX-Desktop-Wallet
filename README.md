@@ -2,13 +2,14 @@
 
 **Local-first BSV and BSV-21 desktop wallet for Windows.** Keys never leave your
 computer, balances are verified against your own SPV header chain, and BSV-21
-tokens, locks, peer trading, and peer chat are built and signed locally.
+tokens, locks, peer trading, peer chat, and end-to-end encrypted email are
+built and signed locally.
 
 **[⬇ Download for Windows](https://github.com/captainsvbot/LBSX-Desktop-Wallet/releases/latest)**
 · [Install guide](#download-and-install) · [BananaBlocks API key](#bananablocks-api-key)
 · [Disclaimer](#disclaimer-no-warranty-no-liability)
 
-> **Version 2.1.00** · MIT licensed · Windows x64
+> **Version 2.1.20** · MIT licensed · Windows x64
 > · Electron 39 + React 18 + Vite 6
 
 > ## ⚠️ Read this first
@@ -58,6 +59,7 @@ no keys, and no build artifacts** — see
   - [SPV header chain and reorganisation handling](#spv-header-chain-and-reorganisation-handling)
 - [Security model](#security-model)
 - [Feature deep dives](#feature-deep-dives)
+  - [Encrypted email](#encrypted-email)
 - [Download and install](#download-and-install)
 - [Generating a recovery phrase safely](#generating-a-recovery-phrase-safely)
 - [Pasting values into the wallet](#pasting-values-into-the-wallet)
@@ -319,10 +321,20 @@ a bounded upper bound on the hot paths.
 
 - The encrypted state document is a single JSON blob. Measured on this
   machine after real use: **3.63 MB**.
-- The growth drivers are all explicitly capped in the code:
-  admin index transactions → 5,000; admin pending
-  → 1,000; activity detail lookups per sync → 500; Peer Chat feed → the last
-  150 messages; BEEF proof size → 32 MB ceiling.
+- **The histories are not capped.** The admin-wallet index, the Peer Chat
+  feed, the mailbox, and the deleted-message tombstones all grow with the
+  chain history rather than with the number of syncs. Each is merged by
+  transaction id, so a re-sync of a known record updates it in place
+  instead of appending a duplicate, and a peer who makes transactions for
+  years keeps every one of them. A cap here would silently drop the oldest
+  history, which is exactly the record a long-lived peer needs.
+- What *is* bounded is per-sync work, not what is kept: activity detail
+  lookups per sync → 500, and admin-index history pages per sync → 8. Both
+  are rate-limit guards. The remainder is carried forward by a persisted
+  cursor and picked up by the next sync, so no history is lost — the sync
+  just does not try to walk the whole chain in one sitting.
+- A single BEEF proof is capped at a 32 MB ceiling, because a proof larger
+  than that is a malformed or hostile response rather than a real one.
 - The wallet's own UTXO history is **not** capped. The scan follows the
   indexer's cursor until the latest block has been covered, so a wallet with
   thousands of outputs keeps every one of them in `observedBsvUtxos` and shows
@@ -565,6 +577,7 @@ limits.
 | **Trading** | Peer-to-peer BSV-21 order book: list, buy, cancel, and live order discovery. |
 | **BSV-21 Tools** | Mint a fixed-supply BSV-21 token with an embedded PNG/JPEG/WebP icon, atomically. |
 | **Peer Chat** | On-chain messages anchored to a shared discovery address. |
+| **Email** | End-to-end encrypted mail between BSV addresses, encrypted to the recipient's public key and anchored on-chain. Threaded conversations, attachments, spam classification, local drafts, and a recipient payment so the person you mail can afford to answer. |
 | **Security center** | Vault status, active address, derivation path, and one-click lock. |
 | **UTXO Store** (Security tab) | Every saved output of the wallet: TXID, VOUT, value, type (`Spendable BSV`, `Token BUILD`, `Locked`, `Spent`, `Unverified`) and block height. Searchable, 20 rows per page. |
 | **API key** | Optional BananaBlocks API key, encrypted with the OS key store. |
@@ -882,8 +895,11 @@ still required to broadcast.
   module-level variable, and zeroed on lock.
 - **Renderer isolation.** `contextIsolation: true`, `nodeIntegration: false`,
   `sandbox: true`. The renderer is served a frozen, allow-listed API through
-  `contextBridge` and has no Node access. All window-opening is denied, and
-  navigation is blocked except the dev server or the packaged `file://` page.
+  `contextBridge` and has no Node access. Navigation is blocked except the dev
+  server or the packaged `file://` page, so a link in a message can never take
+  the wallet over. A link does open in the user's browser — but only `http`
+  and `https`, checked on the **parsed** URL, and only in the system browser.
+  The wallet itself never navigates to it.
 - **Local data encryption.** The whole state document is encrypted at rest
   with a seed-derived key, so the file is unreadable without the phrase.
 - **Content Security Policy.** The packaged renderer runs under a strict CSP:
@@ -891,6 +907,12 @@ still required to broadcast.
   `base-uri 'self'`, `frame-uri 'none'`.
 - **SPV-verified spending.** The wallet refuses to sign from a UTXO it has
   not independently verified.
+- **Mail confidentiality.** A message is encrypted to the recipient's public
+  key with AES-256-GCM, under a key derived from an ECDH exchange between the
+  two parties' private keys. The body, the subject, and the attachment
+  contents never appear in the clear anywhere on chain. The renderer never
+  sees key material, and a received attachment is never rendered — only
+  scanned and saved.
 - **Write safety.** Atomic file replacement and per-file write queues prevent
   a corrupt or lost state file.
 
@@ -1127,7 +1149,9 @@ Peer Chat messages are written to the chain in a `safe` data output:
 - A message is only accepted as authentic if the sender's address appears
   among the transaction's input addresses, and if the transaction is
   confirmed.
-- The local cache keeps the most recent 150 messages.
+- The local cache keeps the **entire** chat history — it is merged by
+  transaction id, so it grows with the chain history rather than with the
+  number of syncs.
 
 **Syncing the admin-wallet index.** "Sync messages" indexes the shared
 discovery address so the wallet can show peer activity and peer sell listings.
@@ -1148,6 +1172,154 @@ by the API rate limit, the index keeps its cursor and the page says *"The API
 rate limit paused this sync — X of Y transactions checked. Sync again to
 continue."* rather than showing an error. Once the index is current, the page
 says *"Admin-wallet index is up to date — N transactions checked."*
+
+### Encrypted email
+
+Mail between BSV addresses, encrypted to the recipient's public key and
+anchored on-chain. Nobody — including the operator of the discovery address —
+can read a message that is not addressed to them.
+
+A full plain-language walkthrough is in
+[`docs/HOW-EMAIL-ENCRYPTION-WORKS.md`](docs/HOW-EMAIL-ENCRYPTION-WORKS.md).
+This section is the reference view.
+
+#### How a message is encrypted
+
+Every BSV wallet already has one permanent key pair, derived from the
+recovery phrase. Email does not create a second one — it uses the key you
+already have.
+
+| | What it is | Shared? |
+|---|---|---|
+| **Private key** | The secret half. Signs your transactions, decrypts your mail. | **Never.** It never leaves your device. |
+| **Public key** | The public half. Derived from the private key. | **Yes.** This is what someone needs in order to mail you. |
+
+The sender and the recipient run an ECDH exchange over `secp256k1` to agree on
+a shared secret, derive an AES-256-GCM key from it with HKDF, and encrypt the
+body. **Neither side ever sends the other a secret.** The sender encrypts to
+the recipient's *public* key; only the holder of the matching private key can
+open it.
+
+> **The implementation detail that breaks this in production:** Node's native
+> `crypto.createECDH('secp256k1')` works in plain Node but **throws in the
+> packaged Electron app**, because Electron's Node exposes only a handful of
+> OpenSSL curves and `secp256k1` is not among them. Every offline unit test
+> passes and only the shipped binary fails, at Send time. The wallet computes
+> the exchange with `bsv`'s own pure-JS point arithmetic and takes the **X
+> coordinate** of the shared point — verified byte-identical to OpenSSL's
+> output. The wallet's own test for this is `npm run test:mail-key-exchange`.
+
+The envelope is additionally bound with **AAD** (additional authenticated
+data) carrying the sender, recipient, message id, and timestamp, so a
+ciphertext cannot be replayed into a different conversation.
+
+#### Where the recipient's public key comes from
+
+You never paste a public key. A P2PKH input publishes the spender's
+compressed public key, so the wallet walks the address's history, recovers
+the key, and **verifies that the key actually derives that address** before
+using it. The address is the only thing you exchange.
+
+#### What a mail transaction looks like
+
+```
+in[0]   the sender
+out[0]  3 sats        -> the RECIPIENT   (the recipient payment)
+out[1]  1,000 sats    -> the admin address (the LBSX service fee)
+out[2]  the encrypted mail payload (OP_RETURN)
+out[3]  change        -> the sender
+```
+
+**A mail is only for the wallet it was encrypted to.** The transaction above
+touches three addresses, and all three see it in their own address history —
+the sender's change, the recipient's payment, and the admin wallet's service
+fee. The transaction appearing in a wallet's history therefore proves
+*nothing*. The check that decides ownership is `payload.recipient === your
+address`: the party the body was encrypted to. Without that check the admin
+address collects the service fee on every mail anyone sends and finds every
+one of those mails in its own inbox, undecryptable, because each was
+encrypted to somebody else.
+
+#### The recipient payment
+
+The 3 sat payment to the recipient is **adjustable**, and it exists so that
+the person you mail can afford to answer. Replying costs them a 1,000 sat
+service fee, a network fee, and their own anchor — so a 3 sat payment leaves
+them unable to reply.
+
+The amount is yours to choose, in the compose window, with a live cost
+estimate showing every fee before you confirm:
+
+| | Amount |
+|---|---|
+| **To recipient** | You choose. Defaults to 3 sats; a useful reply-friendly amount is 100,000 sats or more. |
+| **LBSX service fee** | 1,000 sats, to the admin address. Fixed. |
+| **Network fee** | What the transaction actually costs. |
+
+The estimate comes from the same helper the send path uses, so the number
+shown can never drift from the number charged.
+
+#### What is public, and what is not
+
+| | Public by design | Never leaves your device |
+|---|---|---|
+| **Mail** | Sender address, recipient address, timestamp, size, the fact that a mail was sent | The body, the subject, the attachments |
+| **Attachments** | File name, type, and size | The file contents |
+
+**There is no forward secrecy.** A future compromise of your private key
+would expose past mail. There is also no anonymity: the addresses, the
+timestamps, and the amounts are all on a public chain.
+
+#### Attachments are scanned, never rendered
+
+A received file is **never rendered inside the wallet**. There is no inline
+preview, no `<img>`, and no blob URL — a received file gets no rendering
+surface at all in an application that handles money. The only actions are
+**Virus Scan** and **Save**, and the file's true type is detected from its
+decrypted bytes, never from the type the sender claimed. SVG is excluded
+from the inline allow-list entirely, because an SVG can carry script.
+
+The budget is on the **whole mail** — the body plus every attachment must be
+under 50 MB. There is no per-file ceiling and no limit on how many files you
+may attach.
+
+#### Threads, replies, and drafts
+
+- **A thread spans both tabs.** Your reply lands in Sent while the original
+  stays in the Inbox — but they are one conversation, and the thread is
+  grouped from all of its messages and then filtered per tab.
+- **The thread root travels inside the encrypted envelope**, not in the
+  OP_RETURN and not in the AAD. Either would change the wire format and
+  every already-sent mail would fail to decrypt. A plain mail still encrypts
+  to exactly the same envelope as before.
+- **Reply works from both directions.** Replying to a received mail goes back
+  to its sender; replying to a sent mail continues the conversation with
+  its recipient, so you can send "part 2" of something you started.
+- **Drafts are local only.** They live in the encrypted wallet data on this
+  device and are never broadcast. Nothing about a draft reaches the chain.
+
+#### Spam, deletion, and trust are local decisions
+
+- **Spam is classified per sender public key**, not per message. One key
+  controls every address derived from it, so flagging the key catches that
+  sender at all of their addresses — and "unmark" restores every one of their
+  messages by construction, because the messages were only *classified*, never
+  moved or destroyed.
+- **Deleting is local and permanent on-chain.** The transaction stays on the
+  chain forever. The wallet records a tombstone so the next sync does not
+  resurrect it.
+- **Trust is a local vouch.** You can mark a contact as trusted, and they
+  then show a blue verified badge in every tab. It is your word, not a
+  cryptographic claim — it says "I know this key", not "this is who they say
+  they are".
+
+#### The contrast with Peer Chat
+
+Peer Chat's payload is encrypted under a key **derivable from public
+constants** — it is obfuscation against casual readers, nothing more, and
+anyone with the source can read it. Mail's key is a real ECDH exchange
+between two parties' private keys. That difference is the whole point, and
+it is why the mail body is worth protecting while the chat body is not.
 
 ### Activity history
 
@@ -1306,10 +1478,18 @@ review screen before you confirm, in addition to normal network fees.
 | BSV send | 10,000 sats (0.0001 BSV) |
 | Mint a token | 0.5 BSV |
 | Peer Chat message | 1,000 sats |
+| **Email** | **1,000 sats** |
 | Token listing | 0.0001 BSV anchor to the discovery address |
 | Buy a listing | 10,000 sats service fee plus the platform payment shown in review |
 
 Fees are not refundable. Check the review screen for the exact amounts.
+
+**The email fee and the recipient payment are two different things.** The
+1,000 sat service fee above goes to the LBSX admin address and is fixed. The
+**recipient payment** is separate, goes to the person you are mailing, and is
+**yours to choose** — it exists so that they hold enough BSV to answer you.
+It defaults to 3 sats; see
+[the recipient payment](#the-recipient-payment).
 
 ---
 
@@ -1362,6 +1542,15 @@ published standard test vector, and test keys are derived from fixed
 | `npm run test:discovery` | Trading discovery snapshot. |
 | `npm run test:admin-index` | Admin-wallet index synchronisation. |
 | `npm run test:peer-chat` | Peer chat parsing and crypto. |
+| `npm run test:mail-crypto` | The mail envelope: ECDH agreement, AAD binding, and round-trip decryption. |
+| `npm run test:mail-key-exchange` | Both sides derive the identical secret — run this to reproduce the encryption yourself. |
+| `npm run test:mail-recipient-check` | A mail is only claimed by the wallet it was encrypted to, never by one that was merely paid a fee. |
+| `npm run test:mail-thread-draft` | Thread roots inside the encrypted envelope, and local-only drafts. |
+| `npm run test:mail-format` | The reader renders every marker the composer can produce. |
+| `npm run test:mail-compose-roundtrip` | What you compose is exactly what the recipient reads. |
+| `npm run test:mail-attachment-no-preview` | A received attachment is never rendered inside the wallet. |
+| `npm run test:mail-spam` | Sender-key spam classification and restoration. |
+| `npm run test:mail-trust` | Local trust and the verified badge. |
 | `npm run test:bsv-send` | BSV send construction and conservation. |
 | `npm run test:bananablocks-key` | Encrypted API-key storage, enable/disable, and header scoping. |
 | `npm run test:explorer` | Transaction/token explorer URL routing. |
@@ -1409,12 +1598,22 @@ LBSX Desktop Wallet/
 │   ├── admin-wallet-index.cjs #   admin-wallet history scanning
 │   ├── peer-chat.cjs          #   chat parsing
 │   ├── peer-chat-crypto.cjs   #   chat obfuscation
+│   ├── mail.cjs               #   mail: send, receive, threads, drafts, spam
+│   ├── mail-crypto.cjs        #   ECDH + AES-256-GCM envelope
+│   ├── mail-attachments.cjs   #   encrypted attachment payloads
+│   ├── attachment-file-name.cjs # attachment name sanitisation
+│   ├── public-key-resolver.cjs #  structural script_sig public-key parser
+│   ├── virustotal.cjs        #   attachment scanning
 │   ├── transaction-tracker.cjs#   persist-before-broadcast
 │   ├── bananablocks.cjs       #   API key + provider chain + authenticated fetch
 │   ├── explorer.cjs           #   validated deep links
 │   └── constants.cjs          #   the public discovery address
 ├── src/                       # Renderer (React, ES modules)
 │   ├── App.jsx                #   shell + Overview, Activity, Security
+│   ├── MailPage.jsx           #   the Email feature
+│   ├── mail-format.js         #   marker text -> reader formatting
+│   ├── mail-compose.js        #   editor markup -> marker text
+│   ├── mail-search.js         #   mailbox search helpers
 │   ├── TradingPage.jsx
 │   ├── Bsv21ToolsPage.jsx
 │   ├── PeerChatPage.jsx
@@ -1422,10 +1621,14 @@ LBSX Desktop Wallet/
 │   ├── ExplorerReference.jsx
 │   └── *.css
 ├── scripts/                   # Offline smoke tests
+├── docs/                      # Design and explainer documents
+│   ├── HOW-EMAIL-ENCRYPTION-WORKS.md
+│   ├── ATTACHMENTS-DESIGN.md
+│   └── MAIL-FEATURE-PLAN.md
 ├── assets/                    # Icons and branding
 ├── index.html                 # Vite entry + CSP
 ├── vite.config.js
-├── package.json               # Version 2.1.00
+├── package.json               # Version 2.1.20
 ├── TRADING-PLAN.md            # Trading design and its limits
 ├── SECURITY.md                # Disclosure policy and threat model
 ├── CONTRIBUTING.md            # Contributor guide

@@ -84,7 +84,7 @@ try {
   await waitFor(async () => evaluate(`(document.body?.innerText || '').includes('Good to see you.')`), 'unlocked test wallet');
   const overviewCopy = await evaluate(`document.querySelector('.overview-sync-copy')?.innerText || ''`);
   assert(
-    overviewCopy.includes('Balance sync requests BSV and BSV-21 balances and UTXOs')
+    overviewCopy.includes('Balances sync from BananaBlocks')
       && overviewCopy.includes('Your recovery phrase and private keys never leave this device.'),
     'Overview should explain sync data sources, local protection, and secret handling',
   );

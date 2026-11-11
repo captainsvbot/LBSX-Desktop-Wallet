@@ -1,0 +1,2677 @@
+/* Encrypted mail (Email tab) for the LBSX Desktop Wallet.
+   Follows the global token set in styles.css: --surface, --surface2, --line,
+   --muted, --mint, --mint2, --gold, --red, --mono, --display. */
+
+.ml-page {
+  width: 100%;
+  /* No max-width: the mail page grows with the window so a wider screen
+     shows more of the list instead of leaving dead space on the right. */
+  margin: 0;
+}
+
+.ml-page-heading {
+  margin-bottom: 22px;
+}
+
+.ml-page-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.ml-page-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #a0ebbf, #61d396);
+  color: #0b1711;
+  box-shadow: 0 5px 18px rgba(85, 205, 139, .16);
+}
+
+.ml-page-title h1 {
+  margin: 0;
+  font: 700 24px var(--display);
+  letter-spacing: -.035em;
+  color: #f0f5f2;
+}
+
+.ml-encrypted-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 99px;
+  border: 1px solid rgba(119, 220, 165, .22);
+  background: rgba(119, 220, 165, .07);
+  color: #93dcb1;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+
+.ml-page-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ml-info-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .035);
+  color: #8d9b93;
+}
+
+.ml-info-button:hover {
+  color: var(--mint);
+  border-color: rgba(119, 220, 165, .3);
+}
+
+/* ---------- info panel ---------- */
+
+.ml-info-panel {
+  margin-bottom: 18px;
+  padding: 18px;
+  border-radius: 15px;
+  border: 1px solid rgba(119, 220, 165, .16);
+  background: linear-gradient(145deg, rgba(20, 28, 29, .94), rgba(15, 22, 23, .96));
+}
+
+.ml-info-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 13px;
+  color: var(--mint);
+}
+
+.ml-info-head b {
+  flex: 1;
+  font-size: 12px;
+  color: #dfe9e3;
+}
+
+.ml-info-panel ul {
+  margin: 0 0 15px;
+  padding-left: 18px;
+  display: grid;
+  gap: 9px;
+}
+
+.ml-info-panel li {
+  font-size: 10.5px;
+  line-height: 1.65;
+  color: #94a39a;
+}
+
+.ml-info-panel li b {
+  color: #cddbd3;
+  font-weight: 600;
+}
+
+/* ---------- toolbar ---------- */
+
+.ml-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.ml-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .025);
+}
+
+.ml-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: transparent;
+  color: #8b9891;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: color .14s, background .14s;
+}
+
+.ml-tabs button:hover {
+  color: #dfe9e3;
+  background: rgba(255, 255, 255, .04);
+}
+
+.ml-tabs button:focus-visible {
+  outline: 2px solid rgba(119, 220, 165, .5);
+  outline-offset: -2px;
+}
+
+.ml-tabs button.active {
+  color: #0f1d16;
+  background: linear-gradient(135deg, #a0ebbf, #61d396);
+}
+
+.ml-tabs button.active:hover {
+  background: linear-gradient(135deg, #a9f0c8, #6cdda0);
+}
+
+.ml-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, .08);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ml-count-unread {
+  background: #4ea3f0;
+  color: #05121c;
+  font-weight: 700;
+}
+
+.ml-tabs button.active .ml-count {
+  background: rgba(0, 0, 0, .16);
+}
+
+.ml-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- buttons ---------- */
+
+.ml-primary-button,
+.ml-secondary-button,
+.ml-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: .18s;
+}
+
+.ml-primary-button {
+  height: 37px;
+  padding: 0 15px;
+  border: 1px solid rgba(137, 233, 179, .55);
+  color: #102018;
+  background: linear-gradient(135deg, #a0ebbf, #61d396);
+  box-shadow: 0 5px 18px rgba(85, 205, 139, .13);
+}
+
+.ml-primary-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.ml-secondary-button {
+  height: 37px;
+  padding: 0 13px;
+  background: rgba(255, 255, 255, .045);
+  border: 1px solid var(--line);
+  color: #c1cec6;
+}
+
+.ml-secondary-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, .08);
+  color: #f1f6f3;
+}
+
+.ml-text-button {
+  border: 0;
+  background: transparent;
+  color: #81dba8;
+  font-size: 10px;
+  padding: 6px 8px;
+}
+
+.ml-text-button:hover {
+  color: #a8ecc8;
+}
+
+.ml-icon-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .035);
+  color: #8d9b93;
+}
+
+.ml-icon-button:hover:not(:disabled) {
+  color: var(--mint);
+  border-color: rgba(119, 220, 165, .3);
+}
+
+.ml-icon-button.ml-danger:hover:not(:disabled) {
+  color: var(--red);
+  border-color: rgba(237, 120, 109, .35);
+  background: rgba(237, 120, 109, .08);
+}
+
+/* ---------- layout ---------- */
+
+/* ---------- layout: left nav rail + content ---------- */
+
+/* The mail page stretches to fill the window instead of sitting in the
+   fixed-width content column the other pages use. A mail list is a working
+   surface: the more columns it can show, the less the user has to scroll.
+   Everything is pushed to the LEFT so the extra width lands on the list and
+   the message detail, where it is useful. */
+.main-area-wide .page-content {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding-left: 30px;
+  padding-right: 30px;
+}
+
+.ml-layout {
+  display: grid;
+  /* A narrow rail on the left, then the list and the detail pane. The list
+     gets the larger share so a long subject stays readable; the detail pane
+     keeps a comfortable minimum for reading the mail itself. */
+  grid-template-columns: 160px minmax(430px, 1.3fr) minmax(360px, 1fr);
+  gap: 13px;
+  align-items: stretch;
+  /* The panes fill the window height, so there is no dead zone underneath
+     them and the message body gets the full vertical space. The offset is the
+     top bar plus the heading, toolbar and search row above the panes. */
+  height: calc(100vh - 312px);
+  min-height: 380px;
+}
+
+/* The left rail mirrors the app's own sidebar: a quiet column of items that
+   reads as navigation, not as a row of tabs. */
+.ml-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 8px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: linear-gradient(145deg, rgba(20, 28, 29, .94), rgba(15, 22, 23, .96));
+  position: sticky;
+  top: 12px;
+  /* The rail is a short menu, not a column that stretches. */
+  align-self: start;
+}
+
+.ml-subnav-caption {
+  padding: 6px 10px 8px;
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #5f6d66;
+}
+
+.ml-subnav-caption-gap {
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.ml-subnav-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #89958f;
+  font-size: 11.5px;
+  text-align: left;
+  transition: .16s;
+}
+
+.ml-subnav-item svg {
+  color: #6b7871;
+  flex: none;
+}
+
+.ml-subnav-item > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.ml-subnav-item:hover {
+  color: #e2ece6;
+  background: rgba(255, 255, 255, .035);
+}
+
+.ml-subnav-item.active {
+  color: #b1f2cc;
+  background: linear-gradient(90deg, rgba(73, 191, 132, .16), rgba(73, 191, 132, .045));
+  box-shadow: inset 2px 0 #77dca5;
+}
+
+.ml-subnav-item.active svg {
+  color: var(--mint);
+}
+
+.ml-subnav-count {
+  font-size: 10px;
+  color: #6b7871;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Inside the rail the count is plain text, not the blue pill the old tab
+   strip used - otherwise it reads as a solid block instead of a number. */
+.ml-subnav-count.ml-count-unread {
+  background: none;
+  color: var(--mint);
+  font-weight: 600;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+}
+
+.ml-list-panel,
+.ml-detail-panel,
+.ml-compose,
+.ml-contacts-panel {
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: linear-gradient(145deg, rgba(20, 28, 29, .94), rgba(15, 22, 23, .96));
+}
+
+.ml-list-panel {
+  padding: 7px 0;
+  /* The list fills its column and scrolls inside it. */
+  max-height: none;
+  height: 100%;
+  overflow-y: auto;
+  /* Square corners, like a mail list. */
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+}
+
+.ml-detail-panel {
+  padding: 22px;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------- search bar ---------- */
+
+.ml-searchbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 0 12px;
+  height: 40px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .03);
+  position: relative;
+}
+
+.ml-searchbar:focus-within {
+  border-color: rgba(116, 218, 160, .38);
+  background: rgba(255, 255, 255, .05);
+}
+
+.ml-search-icon {
+  color: #6f7d75;
+  flex: none;
+}
+
+.ml-searchbar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #dfe9e3;
+  font-size: 11.5px;
+  outline: none;
+}
+
+.ml-searchbar input::placeholder {
+  color: #5f6c65;
+}
+
+.ml-searchbar input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.ml-search-clear {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .06);
+  color: #8d9b93;
+  flex: none;
+}
+
+.ml-search-clear:hover {
+  color: var(--mint);
+}
+
+.ml-sort-wrap {
+  position: relative;
+  flex: none;
+}
+
+.ml-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .04);
+  color: #a7b5ab;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ml-sort-button:hover {
+  color: var(--mint);
+  border-color: rgba(119, 220, 165, .3);
+}
+
+.ml-sort-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 170px;
+  padding: 5px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: linear-gradient(145deg, #16201f, #111a1b);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .45);
+}
+
+.ml-sort-menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: #a7b5ab;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  text-align: left;
+}
+
+.ml-sort-menu button:hover {
+  background: rgba(255, 255, 255, .05);
+  color: #e2ece6;
+}
+
+.ml-sort-menu button.active {
+  color: var(--mint);
+  background: rgba(119, 220, 165, .1);
+}
+
+.ml-search-summary {
+  margin-bottom: 10px;
+  font-size: 10px;
+  color: #7c8a83;
+}
+
+/* ---------- day grouping ---------- */
+
+.ml-day-group + .ml-day-group {
+  margin-top: 4px;
+}
+
+.ml-day-label {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 7px 12px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #7f8d85;
+  background: linear-gradient(180deg, rgba(17, 25, 26, .97), rgba(17, 25, 26, .88));
+  backdrop-filter: blur(6px);
+}
+
+/* ---------- Gmail-style rows ---------- */
+
+.ml-row {
+  position: relative;
+  width: 100%;
+  display: grid;
+  /* Gmail-style row: marker, sender, subject, date. The sender column is
+     sized to the name so the subject gets every remaining pixel instead of
+     being squeezed into what is left. */
+  grid-template-columns: 16px minmax(58px, 92px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  transition: background .14s;
+}
+
+/* A hairline between rows reads as a list rather than a stack of floating
+   buttons. It fades out on the last row of a group so the group does not
+   end on a hard line. */
+.ml-row::after {
+  content: '';
+  position: absolute;
+  left: 32px;
+  right: 12px;
+  bottom: 0;
+  height: 1px;
+  background: rgba(213, 232, 225, .05);
+  pointer-events: none;
+  transition: background .14s;
+}
+
+.ml-day-group .ml-row:last-child::after {
+  display: none;
+}
+
+.ml-row:hover {
+  background: rgba(255, 255, 255, .035);
+}
+
+.ml-row:hover::after,
+.ml-row.selected::after {
+  background: transparent;
+}
+
+.ml-row.selected {
+  /* The selected row highlights across the full width of the list, the way
+     a mail client marks the open message. */
+  background: linear-gradient(90deg, rgba(73, 191, 132, .17), rgba(73, 191, 132, .05));
+  box-shadow: inset 2px 0 #77dca5;
+}
+
+/* The selected row keeps its highlight when it is focused, so keyboard
+   users can see where they are. */
+.ml-row:focus-visible {
+  outline: 2px solid rgba(119, 220, 165, .55);
+  outline-offset: -2px;
+}
+
+.ml-row-marker {
+  display: grid;
+  place-items: center;
+  color: #55635c;
+}
+
+.ml-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ea3f0;
+  box-shadow: 0 0 8px rgba(78, 163, 240, .45);
+}
+
+.ml-row-warn {
+  color: #e79c93;
+}
+
+.ml-row-read-icon {
+  color: #3f4c46;
+}
+
+.ml-row-sender {
+  font-size: 11px;
+  color: #96a49b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Keep the name and the badge together on one line. */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ml-row-content {
+  min-width: 0;
+  font-size: 11.5px;
+  color: #8b9891;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The subject sits directly against the sender, the way a mail list is
+     meant to read, and takes all the remaining width. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The subject is left-aligned and takes the whole remaining column, so a
+   long title uses the space instead of floating in the middle of it. */
+.ml-row-subject {
+  color: #9aa89f;
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  font-size: 11px;
+  letter-spacing: .005em;
+}
+
+/* The name itself truncates; the verified badge next to it never does. */
+.ml-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The "To " prefix on a sent message. */
+.ml-row-to {
+  color: #5f6d66;
+  flex: none;
+}
+
+/* The blue verified mark beside a trusted contact's name. */
+.ml-verified-badge {
+  display: inline-block;
+  margin-left: 5px;
+  color: #4ea3f0;
+  vertical-align: -1px;
+  flex: none;
+}
+
+/* The trust button on a contact row. It is only lit when the contact is
+   trusted, so an untrusted contact's button stays quiet. */
+.ml-trust-button {
+  color: #5f6d66;
+}
+
+.ml-trust-button:hover {
+  color: #4ea3f0;
+  border-color: rgba(78, 163, 240, .38);
+  background: rgba(78, 163, 240, .08);
+}
+
+.ml-trust-button.active {
+  color: #4ea3f0;
+  border-color: rgba(78, 163, 240, .4);
+  background: rgba(78, 163, 240, .11);
+}
+
+/* A trusted contact's avatar shows the verified mark instead of a letter. */
+.ml-contact-avatar-trusted {
+  color: #4ea3f0;
+}
+
+.ml-row-snippet {
+  color: #78877f;
+}
+
+/* Unread is the whole row - no dot-only treatment. */
+.ml-row.unread .ml-row-sender,
+.ml-row.unread .ml-row-subject {
+  color: #eaf1ec;
+  font-weight: 600;
+}
+
+.ml-row.unread .ml-row-snippet {
+  color: #a4b3aa;
+}
+
+.ml-row.unread .ml-row-date {
+  color: #9fd8b8;
+  font-weight: 600;
+}
+
+.ml-row-date {
+  font-size: 10px;
+  color: #6b7972;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.ml-row-tag {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.ml-row-tag-warn {
+  background: rgba(237, 120, 109, .12);
+  border: 1px solid rgba(237, 120, 109, .26);
+  color: #e79c93;
+}
+
+.ml-row-tag-pending {
+  background: rgba(231, 180, 73, .12);
+  border: 1px solid rgba(231, 180, 73, .26);
+  color: #d9b56a;
+}
+
+/* ---------- message rows (legacy stacked style kept for fallback) ---------- */
+
+.ml-message-row {
+  width: 100%;
+  display: flex;
+  gap: 11px;
+  padding: 12px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  text-align: left;
+  transition: .16s;
+}
+
+.ml-message-row:hover {
+  background: rgba(255, 255, 255, .035);
+}
+
+.ml-message-row.active {
+  background: linear-gradient(90deg, rgba(73, 191, 132, .14), rgba(73, 191, 132, .04));
+  box-shadow: inset 2px 0 #77dca5;
+}
+
+.ml-message-icon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.ml-message-icon.received {
+  background: rgba(119, 220, 165, .09);
+  color: var(--mint);
+}
+
+.ml-message-icon.sent {
+  background: rgba(231, 180, 73, .1);
+  color: var(--gold);
+}
+
+.ml-message-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ml-message-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ml-message-top b {
+  font-size: 11px;
+  font-weight: 600;
+  color: #d6e1d9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml-message-subject {
+  font-size: 10.5px;
+  color: #93a29a;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml-message-meta {
+  display: flex;
+  gap: 5px;
+  margin-top: 5px;
+  font-size: 9px;
+  color: #6b7972;
+}
+
+/* ---------- status pills ---------- */
+
+.ml-status {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 99px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.ml-status-confirmed {
+  background: rgba(119, 220, 165, .1);
+  border: 1px solid rgba(119, 220, 165, .22);
+  color: #8fd9ae;
+}
+
+.ml-status-pending {
+  background: rgba(231, 180, 73, .1);
+  border: 1px solid rgba(231, 180, 73, .22);
+  color: #d9b56a;
+}
+
+.ml-status-undecryptable {
+  background: rgba(237, 120, 109, .1);
+  border: 1px solid rgba(237, 120, 109, .24);
+  color: #e79c93;
+}
+
+/* ---------- detail ---------- */
+
+.ml-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: #8d9b93;
+  font-size: 10px;
+  padding: 4px 0;
+  margin-bottom: 14px;
+}
+
+.ml-back-button:hover {
+  color: var(--mint);
+}
+
+.ml-detail-head h2 {
+  margin: 0 0 9px;
+  font: 600 17px var(--display);
+  letter-spacing: -.02em;
+  color: #eaf1ec;
+  word-break: break-word;
+}
+
+/* The sender's initial, so the message header reads like a conversation
+   rather than a database row. */
+.ml-detail-identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ml-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(119, 220, 165, .16), rgba(119, 220, 165, .06));
+  border: 1px solid rgba(119, 220, 165, .18);
+  color: #a5e4bc;
+  font: 700 14px var(--display);
+}
+
+.ml-detail-identity-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.ml-detail-identity-text h2 {
+  margin: 0 0 7px;
+}
+
+/* The counterparty's name (or a shortened address) sits next to the
+   From/To label rather than running into it. */
+.ml-detail-party {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.ml-detail-party b {
+  font-weight: 600;
+  color: #a9b8ae;
+}
+
+.ml-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 9.5px;
+  color: #7c8a83;
+}
+
+.ml-detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.ml-body {
+  margin-top: 18px;
+  padding: 17px 18px;
+  border-radius: 12px;
+  background: #0b1112;
+  border: 1px solid rgba(215, 235, 224, .07);
+  color: #d3ded7;
+  font-size: 12.5px;
+  line-height: 1.75;
+  /* Inside a conversation the scrolling is done by the conversation column,
+     so the body itself only takes the space it needs. */
+  flex: none;
+  overflow: visible;
+  /* The container is normal flow now that the body is rendered as blocks;
+     the text inside each block keeps its own spacing. */
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* A body that is NOT inside a conversation - the single-message case - still
+   needs to fill and scroll the pane. */
+.ml-detail-panel > .ml-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Each rendered paragraph. */
+.ml-body-p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.ml-body-gap {
+  height: .85em;
+}
+
+/* A bulleted list in the body. */
+.ml-body-list {
+  margin: 0 0 4px;
+  padding-left: 20px;
+  list-style: disc;
+}
+
+.ml-body-list li {
+  margin: 0 0 3px;
+}
+
+/* Inline code. */
+.ml-body-code {
+  font: 400 11.5px var(--mono);
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .07);
+  color: #a9e3c4;
+}
+
+/* A link in the body. */
+/* The link in a received message. Blue text with a BLUE underline - the
+   standard treatment, and what a reader expects to be able to click. */
+.ml-body-link {
+  color: #6fb2f2;
+  text-decoration: underline;
+  text-decoration-color: #6fb2f2;
+  text-underline-offset: 2px;
+}
+
+.ml-body-link:hover {
+  color: #9ccdff;
+}
+
+.ml-undecryptable {
+  display: flex;
+  gap: 11px;
+  margin-top: 18px;
+  padding: 15px;
+  border-radius: 11px;
+  border: 1px solid rgba(237, 120, 109, .18);
+  background: rgba(237, 120, 109, .05);
+  color: #e79c93;
+}
+
+.ml-undecryptable svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.ml-undecryptable b {
+  display: block;
+  font-size: 11px;
+  color: #f0b6ae;
+}
+
+.ml-undecryptable p {
+  margin: 5px 0 4px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #c4a9a4;
+}
+
+.ml-undecryptable small {
+  font-size: 9px;
+  color: #8e7f7b;
+}
+
+.ml-reply-unavailable {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(231, 180, 73, .2);
+  background: rgba(231, 180, 73, .06);
+  color: #d9b56a;
+  font-size: 10px;
+}
+
+.ml-attach-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px dashed rgba(255, 255, 255, .16);
+  border-radius: 9px;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+
+.ml-attach-picker:hover {
+  border-color: rgba(255, 255, 255, .3);
+  color: var(--text);
+}
+
+.ml-attach-picker input {
+  display: none;
+}
+
+.ml-attach-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ml-attach-list li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .02);
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 0;
+}
+
+.ml-attach-name {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.ml-attach-size {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ml-attach-list li button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ml-attach-list li button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, .22);
+  color: var(--text);
+}
+
+.ml-attach-list li button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.ml-attach-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ml-attach-error {
+  color: #e08a8a;
+  font-size: 10px;
+  margin-left: auto;
+  text-align: right;
+}
+
+.ml-attachments {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.ml-attachments-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.ml-attach-list-detail {
+  margin-top: 0;
+}
+
+/* Attachments are never rendered inline. There is deliberately no preview
+   style: a received file gets no rendering surface in the wallet. */
+
+.ml-attachments-note {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: .75;
+  text-align: right;
+}
+
+.ml-attach-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.ml-attach-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.ml-scan-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .02);
+  font-size: 10px;
+}
+
+.ml-scan-verdict {
+  font-weight: 600;
+}
+
+.ml-scan-ok {
+  border-color: rgba(120, 200, 140, .28);
+  background: rgba(120, 200, 140, .07);
+}
+
+.ml-scan-ok .ml-scan-verdict {
+  color: #8fd09c;
+}
+
+.ml-scan-warn {
+  border-color: rgba(231, 180, 73, .3);
+  background: rgba(231, 180, 73, .07);
+}
+
+.ml-scan-warn .ml-scan-verdict {
+  color: #e3b866;
+}
+
+.ml-scan-danger {
+  border-color: rgba(224, 120, 120, .34);
+  background: rgba(224, 120, 120, .08);
+}
+
+.ml-scan-danger .ml-scan-verdict {
+  color: #e08a8a;
+}
+
+.ml-scan-note {
+  color: var(--text-dim);
+}
+
+.ml-scan-names {
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+}
+
+.ml-scan-link {
+  color: #7fb0e0;
+  text-decoration: none;
+  margin-left: auto;
+}
+
+.ml-scan-link:hover {
+  text-decoration: underline;
+}
+
+.ml-attach-saved {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.ml-upload-confirm {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid rgba(231, 180, 73, .28);
+  border-radius: 10px;
+  background: rgba(231, 180, 73, .06);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.ml-upload-confirm p {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.ml-upload-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+
+.ml-attach-note {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.ml-detail-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+  /* The transaction id stays pinned at the bottom of the pane. */
+  flex: none;
+  margin-top: auto;
+}
+
+/* The full transaction id, in small muted text under the message. It is the
+   permanent on-chain record, so it is shown in full and can be copied. */
+.ml-detail-txid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.ml-detail-txid-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #6b7972;
+}
+
+.ml-detail-txid .explorer-reference-link {
+  font: 9px var(--mono);
+  color: #7f8d85;
+  letter-spacing: .01em;
+  word-break: break-all;
+  text-align: left;
+}
+
+.ml-detail-txid .explorer-reference-link:hover {
+  color: var(--mint);
+}
+
+/* The top bar of the detail panel: Back on the left, the options menu on
+   the right. The destructive and secondary actions live in that menu, so the
+   panel footer carries only the reply action. */
+.ml-detail-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ml-detail-menu-wrap {
+  position: relative;
+}
+
+.ml-menu-trigger {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .03);
+  color: #8d9b93;
+}
+
+.ml-menu-trigger:hover {
+  color: var(--mint);
+  border-color: rgba(119, 220, 165, .3);
+  background: rgba(119, 220, 165, .07);
+}
+
+.ml-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 186px;
+  padding: 5px;
+  border-radius: 11px;
+  border: 1px solid rgba(215, 235, 224, .11);
+  background: linear-gradient(145deg, #172120, #101818);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .5);
+  animation: ml-menu-in .12s ease-out;
+}
+
+@keyframes ml-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.ml-menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #c2d0c7;
+  font-size: 11px;
+  text-align: left;
+  transition: background .12s, color .12s;
+}
+
+.ml-menu button:hover {
+  background: rgba(255, 255, 255, .055);
+  color: #eaf1ec;
+}
+
+.ml-menu button svg {
+  flex: none;
+  color: #7f8d85;
+}
+
+.ml-menu button:hover svg {
+  color: var(--mint);
+}
+
+.ml-menu-danger {
+  color: #e79c93 !important;
+}
+
+.ml-menu-danger svg {
+  color: #e79c93 !important;
+}
+
+.ml-menu-danger:hover {
+  background: rgba(237, 120, 109, .11) !important;
+  color: #f0b6ae !important;
+}
+
+.ml-menu-danger:hover svg {
+  color: #f0b6ae !important;
+}
+
+.ml-menu-separator {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--line);
+}
+
+/* The "Pinned" marker next to the message metadata. */
+.ml-detail-pinned {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  border: 1px solid rgba(119, 220, 165, .24);
+  background: rgba(119, 220, 165, .09);
+  color: #8fd9ae;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+/* The pin marker on a mail row. */
+.ml-row-pin {
+  color: var(--mint);
+}
+
+/* The banner shown on a message whose sender is spam-flagged. */
+.ml-spam-banner {
+  display: flex;
+  gap: 11px;
+  margin-top: 18px;
+  padding: 15px;
+  border-radius: 11px;
+  border: 1px solid rgba(226, 179, 90, .22);
+  background: rgba(226, 179, 90, .06);
+  color: #e2b35a;
+}
+
+.ml-spam-banner svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.ml-spam-banner b {
+  display: block;
+  font-size: 11px;
+  color: #edc682;
+}
+
+.ml-spam-banner p {
+  margin: 5px 0 0;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #c4b28a;
+}
+
+/* The "Spam" tag on a mail row. */
+.ml-row-tag-spam {
+  background: rgba(226, 179, 90, .12);
+  border: 1px solid rgba(226, 179, 90, .3);
+  color: #e2b35a;
+}
+
+.ml-compose .ml-fee-note {
+  margin: 0 16px 12px;
+}
+
+.ml-compose .ml-error {
+  margin: 0 16px 12px;
+}
+
+.ml-compose .ml-own-card {
+  margin: 0 16px 14px;
+}
+
+/* ---------- conversation threads ---------- */
+
+/* The conversation column. Each message in the thread is one entry, oldest
+   first, so the exchange reads top to bottom. */
+.ml-conversation {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 16px;
+}
+
+.ml-conversation-entry {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The per-message header inside a thread. */
+.ml-conversation-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+
+.ml-avatar-small {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+  border-radius: 8px;
+}
+
+.ml-conversation-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: #7c8a83;
+}
+
+.ml-conversation-meta b {
+  font-weight: 600;
+  color: #a9b8ae;
+}
+
+/* The separator between two messages of the same conversation. */
+.ml-conversation-divider {
+  height: 1px;
+  margin: 16px 0;
+  background: rgba(213, 232, 225, .07);
+}
+
+/* The transaction id of ONE message, under that message. Every message in a
+   conversation is its own transaction, so each carries its own id. */
+.ml-conversation-txid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.ml-conversation-txid .explorer-reference-link {
+  font: 9px var(--mono);
+  color: #7f8d85;
+  word-break: break-all;
+  text-align: left;
+}
+
+.ml-conversation-txid .explorer-reference-link:hover {
+  color: var(--mint);
+}
+
+/* The reply count badge on a thread row. */
+.ml-row-replies {
+  flex: none;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, .07);
+  color: #8b9891;
+  font-size: 9.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- drafts ---------- */
+
+.ml-drafts-note {
+  font-size: 10px;
+  color: #6b7972;
+}
+
+.ml-draft {
+  padding: 13px 14px;
+  margin-bottom: 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .02);
+}
+
+.ml-draft-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.ml-draft-head b {
+  font: 600 12.5px var(--display);
+  color: #dfe9e2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml-draft-head span {
+  flex: none;
+  font-size: 9.5px;
+  color: #6b7972;
+}
+
+.ml-draft-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 10px;
+  color: #7c8a83;
+  margin-bottom: 7px;
+}
+
+.ml-draft-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ml-draft-thread {
+  color: var(--mint);
+}
+
+.ml-draft-body {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: #8b9891;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.ml-draft-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- compose ---------- */
+
+/* The cost block in the compose window. The recipient payment is adjustable
+   and the total is the live estimate, with every fee broken out. */
+.ml-cost {
+  margin: 0 16px 12px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: rgba(119, 220, 165, .045);
+  border: 1px solid rgba(119, 220, 165, .09);
+}
+
+.ml-cost-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ml-cost-anchor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  color: #9ddbb6;
+  white-space: nowrap;
+}
+
+.ml-cost-anchor input {
+  width: 74px;
+  padding: 4px 7px;
+  border: 1px solid rgba(119, 220, 165, .22);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, .25);
+  color: #cdeede;
+  font: 600 11px var(--mono);
+  text-align: right;
+  outline: none;
+}
+
+.ml-cost-anchor input:focus {
+  border-color: rgba(119, 220, 165, .45);
+}
+
+.ml-cost-anchor em {
+  font-style: normal;
+  color: #7fbfa0;
+}
+
+.ml-cost-breakdown {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 9.5px;
+  color: #8fbf9f;
+}
+
+.ml-cost-breakdown b {
+  color: #b6e6cb;
+  font-variant-numeric: tabular-nums;
+}
+
+.ml-cost-total {
+  padding-left: 12px;
+  border-left: 1px solid rgba(119, 220, 165, .16);
+  color: #9ddbb6;
+}
+
+.ml-cost-total b {
+  color: #d6f5e4;
+}
+
+.ml-cost-hint {
+  margin: 7px 0 0;
+  font-size: 9px;
+  line-height: 1.5;
+  color: #6f9d82;
+}
+
+/* The compose window floats OVER the mail page, anchored to the right, so
+   the conversation being replied to stays visible while the user writes. */
+.ml-compose-overlay {
+  position: fixed;
+  top: 78px;
+  right: 26px;
+  bottom: 26px;
+  z-index: 20;
+  width: min(620px, calc(100vw - 340px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, .6);
+  animation: ml-compose-in .16s ease-out;
+}
+
+@keyframes ml-compose-in {
+  from { opacity: 0; transform: translateY(8px) scale(.99); }
+  to { opacity: 1; transform: none; }
+}
+
+.ml-compose {
+  padding: 0;
+  margin-bottom: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+/* The title bar of the compose window. */
+.ml-compose-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, .022);
+}
+
+.ml-compose-titlebar h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font: 600 13px var(--display);
+  color: #eaf1ec;
+}
+
+/* The To / Key / Subject rows. Each is a label and an inline field, the way
+   a mail compose window is laid out. */
+.ml-compose-rows {
+  padding: 4px 16px 0;
+}
+
+.ml-compose-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(213, 232, 225, .05);
+}
+
+.ml-compose-row:last-child {
+  border-bottom: 0;
+}
+
+.ml-compose-row-label {
+  flex: none;
+  width: 54px;
+  font-size: 11px;
+  color: #7c8a83;
+}
+
+.ml-compose-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #e2ebe5;
+  font: 400 12.5px var(--display);
+  padding: 3px 0;
+  outline: none;
+}
+
+.ml-compose-input::placeholder {
+  color: #5f6d66;
+}
+
+select.ml-compose-input {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* The dropdown LIST itself. `appearance: none` styles the closed control, but
+   the opened list is still drawn by the OS - and on a light desktop it comes
+   out as a WHITE panel with dark text, which is unreadable against this dark
+   UI. The option background and colour are set explicitly so the list is
+   dark too. */
+select.ml-compose-input option,
+select.ml-compose-input optgroup {
+  background-color: #121a1b;
+  color: #dfe9e3;
+}
+
+select.ml-compose-input option:checked {
+  background-color: #1b2627;
+  color: #b1f2cc;
+}
+
+.ml-compose-empty {
+  flex: 1;
+  font-size: 11.5px;
+  color: #6b7972;
+}
+
+.ml-compose-row-key .ml-compose-input {
+  font: 400 10px var(--mono);
+  color: #8d9b92;
+}
+
+/* The body editor. It fills the window so there is room to write. */
+.ml-compose-editor {
+  padding: 0 16px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* The RICH EDITOR.
+   The compose editor is a contenteditable region, so it shows the message
+   the way the reader will see it - real bold, real italics, real lists -
+   rather than the raw markers that travel inside the encrypted envelope. */
+.ml-compose-rich {
+  width: 100%;
+  min-height: 140px;
+  padding: 14px 0;
+  color: #d3ded7;
+  font: 400 12.5px/1.75 var(--display);
+  outline: none;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ml-compose-rich:empty::before {
+  content: attr(data-placeholder);
+  color: #5d6b66;
+  pointer-events: none;
+}
+
+/* The editor's own paragraphs and lists, so a message in the composer has
+   the same rhythm as the message in the reader's view. */
+.ml-compose-rich p {
+  margin: 0 0 10px;
+}
+
+.ml-compose-rich p:last-child {
+  margin-bottom: 0;
+}
+
+.ml-compose-rich ul,
+.ml-compose-rich ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+
+.ml-compose-rich li {
+  margin: 0 0 3px;
+}
+
+.ml-compose-rich strong {
+  color: #eaf3ee;
+  font-weight: 700;
+}
+
+.ml-compose-rich em {
+  font-style: italic;
+}
+
+.ml-compose-rich code,
+.ml-compose-rich pre {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: rgba(0, 0, 0, .32);
+  border: 1px solid rgba(255, 255, 255, .06);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+.ml-compose-rich pre {
+  padding: 9px 11px;
+  display: block;
+  white-space: pre-wrap;
+}
+
+/* The link in the compose editor. It is BLUE with a blue underline, the
+   standard treatment, so it looks the same in the composer as it will in
+   the reader's message. */
+.ml-compose-rich a {
+  color: #6fb2f2;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.ml-compose-rich a:hover {
+  color: #9ccdff;
+}
+
+.ml-compose-attachments {
+  margin: 0 16px 10px;
+}
+
+/* The bottom toolbar: send on the left, the editing tools next to it. */
+.ml-compose-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, .018);
+}
+
+.ml-compose-send {
+  flex: none;
+}
+
+.ml-compose-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+
+.ml-compose-tools-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ml-compose-count {
+  font-size: 9.5px;
+  color: #6b7972;
+  font-variant-numeric: tabular-nums;
+}
+
+.ml-tool-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #7f8d85;
+  cursor: pointer;
+  transition: .15s;
+}
+
+.ml-tool-button:hover {
+  color: #d5e2da;
+  background: rgba(255, 255, 255, .06);
+}
+
+.ml-tool-button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+/* A toolbar button with a label, like the Gmail compose footer. */
+.ml-tool-button-wide {
+  width: auto;
+  padding: 0 11px;
+  gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+}
+
+/* The emoji picker drops out of the toolbar. */
+.ml-emoji-pop {
+  position: absolute;
+  bottom: 38px;
+  left: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #141d1e;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .5);
+}
+
+.ml-emoji-pop button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 15px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.ml-emoji-pop button:hover {
+  background: rgba(255, 255, 255, .08);
+}
+
+.ml-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.ml-section-head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font: 600 14px var(--display);
+  color: #e4ece7;
+}
+
+.ml-field {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.ml-field > span {
+  font-size: 10px;
+  color: #a9b6ae;
+}
+
+.ml-field > span em {
+  font-style: normal;
+  font-size: 8px;
+  color: #68776e;
+  margin-left: 5px;
+}
+
+.ml-field input,
+.ml-field textarea,
+.ml-field select {
+  width: 100%;
+  color: #e0e9e3;
+  background: #0b1112;
+  border: 1px solid rgba(215, 235, 224, .1);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 11px;
+  outline: none;
+  resize: vertical;
+}
+
+.ml-field select {
+  cursor: pointer;
+}
+
+.ml-field input:focus,
+.ml-field textarea:focus,
+.ml-field select:focus {
+  border-color: rgba(116, 218, 160, .43);
+  box-shadow: 0 0 0 3px rgba(116, 218, 160, .06);
+}
+
+.ml-field input::placeholder,
+.ml-field textarea::placeholder {
+  color: #5d6a64;
+}
+
+.ml-readonly {
+  font-family: var(--mono);
+  font-size: 10px !important;
+  color: #9fb3a7 !important;
+  background: rgba(255, 255, 255, .02) !important;
+}
+
+.ml-over-limit {
+  border-color: rgba(237, 120, 109, .4) !important;
+}
+
+.ml-hint {
+  font-size: 9px;
+  color: #6b7972;
+  line-height: 1.5;
+}
+
+.ml-hint-warn {
+  color: #e79c93;
+}
+
+.ml-fee-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 11px 12px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: rgba(119, 220, 165, .045);
+  border: 1px solid rgba(119, 220, 165, .09);
+  color: #9ddbb6;
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+.ml-fee-note svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.ml-compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 6px;
+}
+
+.ml-own-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 9.5px;
+  color: #7c8a83;
+  flex-wrap: wrap;
+}
+
+.ml-own-card button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .035);
+  border-radius: 9px;
+  color: #a9b6ae;
+  padding: 7px 10px;
+  font-size: 9.5px;
+}
+
+.ml-own-card button:hover {
+  color: var(--mint);
+  border-color: rgba(119, 220, 165, .3);
+}
+
+.ml-own-card code {
+  font-family: var(--mono);
+}
+
+/* ---------- contacts ---------- */
+
+/* The Contacts section, when it is the selected view in the mail page. It
+   sits in the same slot as the message list. */
+.ml-contacts-view {
+  padding: 20px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.ml-contacts-panel {
+  margin-top: 15px;
+  padding: 20px;
+}
+
+.ml-add-contact {
+  padding: 16px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .022);
+}
+
+.ml-contact-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ml-contact-row:last-of-type {
+  border-bottom: 0;
+}
+
+.ml-contact-avatar {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(119, 220, 165, .16), rgba(119, 220, 165, .06));
+  color: #a8e2c2;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ml-contact-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ml-contact-main b {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #d6e1d9;
+}
+
+.ml-contact-address {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: #7c8a83;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.ml-key-fingerprint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .03);
+  border-radius: 7px;
+  color: #93a29a;
+  padding: 4px 8px;
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.ml-key-fingerprint:hover {
+  color: var(--mint);
+  border-color: rgba(119, 220, 165, .3);
+}
+
+.ml-copied {
+  color: var(--mint);
+}
+
+.ml-share-hint,
+.ml-empty-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 12px 13px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .022);
+  border: 1px solid rgba(255, 255, 255, .04);
+  color: #7f8d85;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.ml-share-hint svg,
+.ml-empty-hint svg {
+  flex: none;
+  margin-top: 1px;
+  color: #8bd9aa;
+}
+
+/* ---------- empty states ---------- */
+
+.ml-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 7px;
+  padding: 48px 22px;
+  color: #6f7d75;
+}
+
+.ml-empty svg {
+  color: #55705f;
+  margin-bottom: 5px;
+}
+
+.ml-empty b {
+  font-size: 12px;
+  color: #a9b6ae;
+}
+
+.ml-empty span {
+  font-size: 10px;
+  line-height: 1.55;
+  max-width: 320px;
+}
+
+.ml-detail-empty {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The detail panel's empty state is the biggest block of empty space in the
+   app, so it gets a hint about what to do next rather than a bare label. */
+.ml-detail-empty svg {
+  width: 38px;
+  height: 38px;
+  padding: 9px;
+  border-radius: 13px;
+  background: rgba(119, 220, 165, .06);
+  border: 1px solid rgba(119, 220, 165, .12);
+  color: #6fae8c;
+  margin-bottom: 11px;
+}
+
+.ml-detail-empty b {
+  font-size: 13px;
+  color: #b7c4bb;
+}
+
+.ml-detail-empty span {
+  max-width: 260px;
+}
+
+/* ---------- notices ---------- */
+
+.ml-error,
+.ml-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 13px;
+  border-radius: 11px;
+  font-size: 10.5px;
+  line-height: 1.55;
+  margin-bottom: 14px;
+}
+
+.ml-error {
+  background: rgba(237, 120, 109, .08);
+  border: 1px solid rgba(237, 120, 109, .18);
+  color: #ffaaa0;
+}
+
+.ml-notice {
+  background: rgba(119, 220, 165, .07);
+  border: 1px solid rgba(119, 220, 165, .18);
+  color: #9ad5ae;
+}
+
+.ml-error svg,
+.ml-notice svg {
+  flex: none;
+}
+
+.ml-error-banner {
+  margin-bottom: 16px;
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  .ml-layout {
+    grid-template-columns: 1fr;
+    /* On a narrow window the panes stack and the page scrolls instead. */
+    height: auto;
+    min-height: 0;
+  }
+
+  .ml-subnav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .ml-subnav-caption {
+    display: none;
+  }
+
+  .ml-subnav-item {
+    width: auto;
+  }
+
+  .ml-list-panel {
+    max-height: 340px;
+    height: auto;
+  }
+
+  .ml-detail-panel {
+    height: auto;
+    overflow: visible;
+  }
+
+  .ml-body {
+    max-height: 380px;
+  }
+}
+
+/* Below this width the list and the detail pane cannot both hold a readable
+   subject, so the rail stays and the panes stack. */
+@media (max-width: 1180px) {
+  .ml-layout {
+    grid-template-columns: 170px minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+  }
+
+  .ml-detail-panel {
+    grid-column: 2;
+    height: auto;
+    overflow: visible;
+  }
+
+  .ml-body {
+    max-height: 460px;
+  }
+}
+
+/* The LINK DIALOG. The text to display and the web address, applied as one
+   action - the same shape as Gmail's link popup. */
+.ml-link-pop {
+  position: absolute;
+  bottom: 38px;
+  left: 0;
+  z-index: 6;
+  width: 320px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #141d1e;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .55);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ml-link-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ml-link-row span {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #7d968b;
+}
+
+.ml-link-row input {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .3);
+  color: #d9e6de;
+  font: 400 12px var(--display);
+  outline: none;
+}
+
+.ml-link-row input:focus {
+  border-color: rgba(119, 220, 165, .4);
+}
+
+.ml-link-row input::placeholder {
+  color: #5d6b66;
+}
+
+.ml-link-error {
+  margin: 0;
+  font-size: 10px;
+  color: #f0a58c;
+}
+
+.ml-link-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.ml-link-apply {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 7px;
+  background: #7fdca6;
+  color: #08120d;
+  font: 600 11px var(--display);
+  cursor: pointer;
+}
+
+.ml-link-apply:hover {
+  background: #93e7b8;
+}
+
+.ml-link-cancel {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: #9ab5a8;
+  font: 400 11px var(--display);
+  cursor: pointer;
+}
+
+.ml-link-cancel:hover {
+  border-color: rgba(255, 255, 255, .18);
+  color: #cfe3d8;
+}
+
+/* The LINK BAR. It appears under the editor when a link in the message is
+   clicked, and lets the user change the address or remove the link. */
+/* The LINK BAR hugs its content. A full-width bar left a wide band of empty
+   dark space across the composer, which read as a design flaw rather than
+   as a control - so it is sized to what it holds. */
+.ml-link-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 8px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .04);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.ml-link-bar-label {
+  color: #8fa79b;
+}
+
+.ml-link-bar-url {
+  color: #6fb2f2;
+  max-width: 240px;
+  text-decoration: underline;
+  text-decoration-color: #6fb2f2;
+  text-underline-offset: 2px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml-link-bar-sep {
+  color: #5d6b66;
+}
+
+.ml-link-bar-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #6fb2f2;
+  font: 400 10.5px var(--display);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.ml-link-bar-action:hover {
+  color: #9ccdff;
+}

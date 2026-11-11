@@ -205,6 +205,19 @@ function getWalletPrivateKey() {
   return bsv.HDPrivateKey.fromSeed(seed).deriveChild(DERIVATION_PATH).privateKey;
 }
 
+// Returns the compressed SEC1 public key for the active derivation path. This
+// is PUBLIC data: it is the key a mail recipient needs in order to encrypt to
+// this wallet, and it is safe to hand to the renderer.
+function getWalletPublicKey() {
+  if (!unlockedMnemonic) throw new Error('Wallet is locked.');
+  const seed = bip39.mnemonicToSeedSync(unlockedMnemonic);
+  try {
+    return bsv.HDPrivateKey.fromSeed(seed).deriveChild(DERIVATION_PATH).publicKey;
+  } finally {
+    seed.fill(0);
+  }
+}
+
 function getWalletDataEncryptionKey() {
   if (!unlockedMnemonic) throw new Error('Wallet is locked.');
   const seed = bip39.mnemonicToSeedSync(unlockedMnemonic);
@@ -230,5 +243,6 @@ module.exports = {
   deleteVault,
   getWalletSummary,
   getWalletPrivateKey,
+  getWalletPublicKey,
   getWalletDataEncryptionKey,
 };

@@ -1,0 +1,92 @@
+
+/* ---------------------------------------------------------------------------
+   Scrollbars
+   ---------------------------------------------------------------------------
+   The default Chromium scrollbar is a light grey slab that looks out of place
+   against the dark surface, and it is wide enough to eat into the layout.
+
+   These rules make every scrollable region use a slim, muted, on-theme bar
+   that only becomes prominent while the user is actually scrolling. The
+   Firefox properties (scrollbar-width / scrollbar-color) come first, then the
+   WebKit pseudo-elements that Chromium and Electron actually render.
+   --------------------------------------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(151, 176, 163, .28) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* The draggable thumb. Rounded, low-contrast at rest so it does not compete
+   with the content, and it never overlaps the text because the track is
+   transparent rather than painted. */
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(151, 176, 163, .26);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background-color .18s ease;
+}
+
+/* Hover brightens it just enough to show it is grabbable. */
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(151, 176, 163, .45);
+}
+
+/* Pressing is the strongest state, so the user gets clear feedback that the
+   bar is under the cursor and is being dragged. */
+*::-webkit-scrollbar-thumb:active {
+  background-color: rgba(130, 224, 176, .62);
+}
+
+/* The little square buttons Chromium adds at each end of the scrollbar on
+   some platforms. They are never useful here, so they are removed. */
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* The corner where a horizontal and vertical scrollbar meet. */
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* The corner box that Chromium reserves for resizing. */
+*::-webkit-scrollbar-resizer {
+  background: transparent;
+}
+
+/* Scrolling containers that sit on a raised card keep the thumb a touch
+   brighter so it does not disappear against the lighter surface. */
+.ml-list-panel,
+.ml-detail-panel,
+.token-modal,
+.market-asks,
+.market-book-column {
+  scrollbar-color: rgba(151, 176, 163, .32) transparent;
+}
+
+.ml-list-panel::-webkit-scrollbar-thumb,
+.ml-detail-panel::-webkit-scrollbar-thumb,
+.token-modal::-webkit-scrollbar-thumb,
+.market-asks::-webkit-scrollbar-thumb,
+.market-book-column::-webkit-scrollbar-thumb {
+  background-color: rgba(151, 176, 163, .32);
+}
+
+.ml-list-panel::-webkit-scrollbar-thumb:hover,
+.ml-detail-panel::-webkit-scrollbar-thumb:hover,
+.token-modal::-webkit-scrollbar-thumb:hover,
+.market-asks::-webkit-scrollbar-thumb:hover,
+.market-book-column::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(151, 176, 163, .5);
+}

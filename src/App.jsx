@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import OnChainTradingPage from './TradingPage.jsx';
 import Bsv21ToolsPage from './Bsv21ToolsPage.jsx';
 import PeerChatPage from './PeerChatPage.jsx';
+import MailPage from './MailPage.jsx';
 import UtxoStorePanel from './UtxoStorePanel.jsx';
 import BsvLogo from './BsvLogo.jsx';
 import BsvText from './BsvText.jsx';
@@ -14,7 +15,7 @@ import './activity.css';
 import {
   Activity, AlertTriangle, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck,
   Blocks, Check, ChevronDown, CircleHelp, Coins, Copy, Eye, EyeOff, FileClock,
-  Fingerprint, KeyRound, LayoutDashboard, LockKeyhole, LogOut, Menu, MessageCircle,
+  Fingerprint, KeyRound, LayoutDashboard, LockKeyhole, LogOut, Mail, Menu, MessageCircle,
   Plus, RefreshCw, Send, Settings2, ShieldCheck, Sparkles, Trash2, Wallet, Unlock,
   TrendingUp,
 } from 'lucide-react';
@@ -47,6 +48,7 @@ const nav = [
   { id: 'trading', label: 'Trading', icon: TrendingUp },
   { id: 'bsv21-tools', label: 'BSV-21 Tools', icon: Coins },
   { id: 'peer-chat', label: 'Peer Chat', icon: MessageCircle },
+  { id: 'email', label: 'Email', icon: Mail },
   { id: 'activity', label: 'Activity', icon: FileClock },
   { id: 'api-key', label: 'API key', icon: KeyRound },
 ];
@@ -210,6 +212,14 @@ export default function App() {
   const [peerChatError, setPeerChatError] = useState('');
   const [peerChatNotice, setPeerChatNotice] = useState('');
   const [peerChatProgress, setPeerChatProgress] = useState(null);
+  const [mailSnapshot, setMailSnapshot] = useState(null);
+  // The LOCAL drafts. They live in the encrypted wallet data, so they are
+  // loaded from the main process like the mailbox itself.
+  const [mailDrafts, setMailDrafts] = useState([]);
+  const [mailContacts, setMailContacts] = useState([]);
+  const [mailOwnCard, setMailOwnCard] = useState(null);
+  const [mailSyncing, setMailSyncing] = useState(false);
+  const [mailError, setMailError] = useState('');
 
   const syncTrading = async () => {
     setTradingSyncing(true);
@@ -406,6 +416,80 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!wallet) {
+      setMailSnapshot(null);
+      setMailContacts([]);
+      setMailOwnCard(null);
+      setMailError('');
+      return undefined;
+    }
+    let active = true;
+    setMailError('');
+    Promise.all([
+      window.lbsx.getMail(),
+      window.lbsx.getMailContacts(),
+      window.lbsx.getOwnMailCard(),
+      window.lbsx.getMailDrafts(),
+    ]).then(([snapshot, contacts, card, draftList]) => {
+      if (!active) return;
+      setMailSnapshot(snapshot);
+      setMailContacts(contacts || []);
+      setMailOwnCard(card || null);
+      setMailDrafts(draftList?.drafts || []);
+    }).catch(error => {
+      if (active) setMailError(error.message || 'Could not load the encrypted mail cache.');
+    });
+    return () => { active = false; };
+  }, [wallet]);
+
+  const syncMail = async () => {
+    setMailSyncing(true);
+    setMailError('');
+    try {
+      const snapshot = await window.lbsx.syncMail();
+      setMailSnapshot(snapshot);
+      return snapshot;
+    } catch (error) {
+      setMailError(error.message || 'Could not sync the encrypted mailbox.');
+      return null;
+    } finally { setMailSyncing(false); }
+  };
+
+  const refreshMail = async () => {
+    try {
+      const [snapshot, contacts, draftList] = await Promise.all([
+        window.lbsx.getMail(),
+        window.lbsx.getMailContacts(),
+        window.lbsx.getMailDrafts(),
+      ]);
+      setMailSnapshot(snapshot);
+      setMailContacts(contacts || []);
+      setMailDrafts(draftList?.drafts || []);
+    } catch (error) {
+      setMailError(error.message || 'The mail was broadcast, but the encrypted local mailbox could not be reloaded.');
+    }
+  };
+
+  // Reloads the LOCAL drafts. Drafts live in the encrypted wallet data, so
+  // they are re-read from the main process rather than kept in page state.
+  const refreshMailDrafts = async () => {
+    try {
+      const draftList = await window.lbsx.getMailDrafts();
+      setMailDrafts(draftList?.drafts || []);
+    } catch (error) {
+      setMailError(error.message || 'The drafts could not be reloaded.');
+    }
+  };
+
+  const refreshMailContacts = async () => {
+    try {
+      setMailContacts(await window.lbsx.getMailContacts());
+    } catch (error) {
+      setMailError(error.message || 'The contact list could not be reloaded.');
+    }
+  };
+
   const refreshLocalSnapshots = async () => {
     try {
       const snapshot = await window.lbsx.getWalletActivity();
@@ -475,6 +559,9 @@ export default function App() {
     setActivitySnapshot(null);
     setTradingSnapshot(null);
     setPeerChatSnapshot(null);
+    setMailSnapshot(null);
+    setMailContacts([]);
+    setMailOwnCard(null);
     setPage('overview');
     clearEntry();
   };
@@ -488,6 +575,9 @@ export default function App() {
     setActivitySnapshot(null);
     setTradingSnapshot(null);
     setPeerChatSnapshot(null);
+    setMailSnapshot(null);
+    setMailContacts([]);
+    setMailOwnCard(null);
     setDeletePrompt(false);
     setPage('overview');
     clearEntry();
@@ -521,7 +611,7 @@ export default function App() {
   }
 
   const activePage = page === 'security' ? 'security' : page;
-  const pageTitle = ({ overview: 'My BSV Wallet', assets: 'Your assets', trading: 'Peer trading', 'bsv21-tools': 'BSV-21 Tools', 'peer-chat': 'Peer Chat', send: 'Send BSV', receive: 'Receive BSV', activity: 'Activity', security: 'Security center', 'api-key': 'BananaBlocks API' })[activePage];
+  const pageTitle = ({ overview: 'My BSV Wallet', assets: 'Your assets', trading: 'Peer trading', 'bsv21-tools': 'BSV-21 Tools', 'peer-chat': 'Peer Chat', email: 'Email', send: 'Send BSV', receive: 'Receive BSV', activity: 'Activity', security: 'Security center', 'api-key': 'BananaBlocks API' })[activePage];
 
   return (
     <div className="app-shell">
@@ -535,16 +625,31 @@ export default function App() {
         <div className="sidebar-bottom">
           <div className="security-shortcut"><div className="shield-icon"><ShieldCheck size={17} /></div><div><b>Keys stay on this device</b><span>Encrypted local vault</span></div></div>
           <button className={`nav-item ${page === 'security' ? 'active' : ''}`} onClick={() => { setPage('security'); setMobileNav(false); }}><Settings2 size={17} /><span>Security</span></button>
-          <div className="sidebar-foot"><span className="status-dot" /> Local-only mode <span className="version">v2.1.00</span></div>
+          <div className="sidebar-foot"><span className="status-dot" /> Local-only mode <span className="version">v2.1.20</span></div>
         </div>
       </aside>
 
       {mobileNav && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
-      <main className={`main-area ${page === 'peer-chat' ? 'main-area-peer-chat' : ''}`}>
+      <main className={`main-area ${page === 'peer-chat' ? 'main-area-peer-chat' : ''} ${page === 'email' ? 'main-area-wide' : ''}`}>
         <header className="topbar">
           <button className="mobile-menu icon-button" onClick={() => setMobileNav(!mobileNav)} aria-label="Toggle menu"><Menu size={19} /></button>
           <div className="breadcrumb"><span>Wallet</span><span className="crumb-slash">/</span><b>{pageTitle}</b></div>
-          <div className="top-actions"><div className="network-chip"><span className="status-dot" /> BSV Mainnet</div><button className="lock-button" onClick={lockWallet}><LockKeyhole size={15} /><span>Lock wallet</span></button></div>
+          <div className="top-actions">
+            {/* The BSV BALANCE, on every tab except Overview. The Overview page
+                already shows the balance in full, so repeating it there would
+                be noise - on the other tabs it is the one number a user wants
+                always on screen, next to the network they are on. */}
+            {page !== 'overview' && <div className="balance-chip" title={chainSnapshot?.balance ? `Confirmed ${chainSnapshot.balance.confirmed} sats · Pending ${chainSnapshot.balance.unconfirmed} sats` : 'Sync balances to read your on-chain balance'}>
+              <span className="balance-chip-amount">
+                {chainSnapshot?.balance
+                  ? formatSatoshis((BigInt(chainSnapshot.balance.confirmed) + BigInt(chainSnapshot.balance.unconfirmed)).toString())
+                  : '—'}
+              </span>
+              <span className="balance-chip-ticker">BSV</span>
+            </div>}
+            <div className="network-chip"><span className="status-dot" /> BSV Mainnet</div>
+            <button className="lock-button" onClick={lockWallet}><LockKeyhole size={15} /><span>Lock wallet</span></button>
+          </div>
         </header>
 
         <div className="page-content">
@@ -574,6 +679,7 @@ export default function App() {
           {page === 'trading' && <OnChainTradingPage tokens={chainSnapshot?.tokens || []} bsvBalance={chainSnapshot?.balance || null} address={wallet.address} onSyncAssets={syncBalances} assetsSyncing={syncing} discoveredOrders={tradingSnapshot?.discoveredOrders || []} discoverySyncedAt={tradingSnapshot?.syncedAt} discoverySyncing={tradingSyncing} discoveryError={tradingError} onSyncDiscovery={syncTrading} />}
           {page === 'bsv21-tools' && <Bsv21ToolsPage balance={chainSnapshot?.balance || null} onMinted={refreshLocalSnapshots} />}
           {page === 'peer-chat' && <PeerChatPage wallet={wallet} snapshot={peerChatSnapshot} tokens={chainSnapshot?.tokens || []} syncing={peerChatSyncing} error={peerChatError} notice={peerChatNotice} status={peerChatProgress || peerChatSnapshot?.status || null} onSync={syncPeerChat} onSent={refreshPeerChat} onGo={setPage} onTokenTipSent={refreshAfterWalletAction} />}
+          {page === 'email' && <MailPage wallet={wallet} snapshot={mailSnapshot} contacts={mailContacts} ownCard={mailOwnCard} drafts={mailDrafts} syncing={mailSyncing} error={mailError} onSync={syncMail} onSent={refreshMail} onContactsChanged={refreshMailContacts} onDraftsChanged={refreshMailDrafts} />}
           {page === 'send' && <ActionPage wallet={wallet} balance={chainSnapshot?.balance} syncing={syncing} onSync={syncBalances} onSent={refreshAfterWalletAction} />}
           {page === 'receive' && <Receive wallet={wallet} onCopy={copyAddress} copied={copied} />}
           {page === 'activity' && <ActivityPage snapshot={activitySnapshot} chainSnapshot={chainSnapshot} tokens={chainSnapshot?.tokens || []} syncing={activitySyncing} balanceSyncing={syncing} checkingPending={pendingStatusChecking} error={activityError} balanceError={syncError} onSync={syncActivity} onSyncBalances={syncBalances} onCheckPending={checkPendingStatuses} />}
@@ -1033,6 +1139,72 @@ function TradingPage({ snapshot, syncing, error, onSync }) {
   </>;
 }
 
+function VirusTotalApiPanel() {
+  const [status, setStatus] = useState(null);
+  const [apiKey, setApiKey] = useState('');
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    window.lbsx.getVirusTotalApiKeyStatus()
+      .then(result => {
+        if (!active) return;
+        setStatus(result);
+        setEnabled(result.enabled);
+      })
+      .catch(reason => { if (active) setError(reason.message || 'Could not read the VirusTotal API key settings.'); });
+    return () => { active = false; };
+  }, []);
+
+  const save = async event => {
+    event.preventDefault();
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const result = await window.lbsx.saveVirusTotalApiKey({ apiKey, enabled });
+      setStatus(result); setEnabled(result.enabled); setApiKey('');
+      setMessage(result.enabled ? 'VirusTotal scanning enabled.' : 'Settings saved. Scanning stays off.');
+    } catch (reason) { setError(reason.message || 'Could not save the API key settings.'); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async () => {
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const result = await window.lbsx.removeVirusTotalApiKey();
+      setStatus(result); setEnabled(false); setApiKey('');
+      setMessage('Saved VirusTotal API key removed.');
+    } catch (reason) { setError(reason.message || 'Could not remove the saved API key.'); }
+    finally { setBusy(false); }
+  };
+
+  return <section className="surface-card api-key-card">
+    <div className="security-head">
+      <div className="security-big-icon"><ShieldCheck size={21} /></div>
+      <div>
+        <h2>VirusTotal attachment scanning</h2>
+        <p>Scan mail attachments before saving them.</p>
+      </div>
+    </div>
+    {status && <div className="api-key-status"><span className={`status-dot ${status.enabled ? '' : 'api-key-status-off'}`} />{status.enabled ? 'Scanning enabled' : status.configured ? 'API key saved but disabled' : 'No API key saved'}</div>}
+    {status?.secureStorageAvailable === false && <div className="sync-error">Secure operating-system storage is unavailable. The wallet will not save an API key insecurely.</div>}
+    <form className="api-key-form" onSubmit={save}>
+      <label className="field-label">VirusTotal API key<input type="password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={status?.configured ? 'Enter a new key to replace the saved key' : 'Paste your VirusTotal API key'} autoComplete="off" spellCheck="false" /></label>
+      <label className="api-key-toggle"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} disabled={!status?.secureStorageAvailable || (!status?.configured && !apiKey.trim())} /><span>Enable VirusTotal scanning</span></label>
+      <p className="api-key-help">The key is encrypted with this computer’s secure storage and sent only to VirusTotal. Attachments are never previewed: the wallet checks the file’s SHA-256 with VirusTotal first, so a file VirusTotal already knows never leaves your device. An unknown file is uploaded only after you agree.</p>
+      <p className="api-key-help">The public VirusTotal API allows 500 requests a day and 4 a minute, and is for non-commercial use. A file that is uploaded becomes permanently public.</p>
+      {error && <div className="sync-error" role="alert">{error}</div>}
+      {message && <div className="api-key-success" role="status">{message}</div>}
+      <div className="api-key-actions">
+        <button className="primary-button" type="submit" disabled={busy || !status?.secureStorageAvailable || (!apiKey.trim() && !status?.configured)}>{busy ? 'Saving…' : 'Save settings'}</button>
+        {status?.configured && <button className="secondary-button" type="button" onClick={remove} disabled={busy}>Remove saved key</button>}
+      </div>
+    </form>
+  </section>;
+}
+
 function BananaBlocksApiPage() {
   const [status, setStatus] = useState(null);
   const [apiKey, setApiKey] = useState('');
@@ -1092,6 +1264,7 @@ function BananaBlocksApiPage() {
         </div>
       </form>
     </section>
+    <VirusTotalApiPanel />
     <LocalNotice />
   </>;
 }

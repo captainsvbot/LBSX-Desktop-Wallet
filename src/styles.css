@@ -158,3 +158,10 @@
 .activity-row-icon.kind-mint{color:#eab300;background:rgba(234,179,0,.1)}
 .activity-row-icon.kind-lock{color:#c4a5ff;background:rgba(196,165,255,.1)}
 .activity-row-icon.kind-trade{color:#ffa86b;background:rgba(255,168,107,.1)}
+/* The BSV balance in the top bar, next to the network chip. It shows on every
+   tab except Overview, where the balance is already the page headline. */
+.balance-chip{display:flex;align-items:baseline;gap:5px;padding:6px 11px;border:1px solid var(--line);border-radius:99px;background:rgba(255,255,255,.02)}
+.balance-chip-amount{font:600 11px var(--mono);color:#e2ece6;font-variant-numeric:tabular-nums}
+.balance-chip-ticker{font-size:9px;font-weight:700;letter-spacing:.04em;color:var(--bsv)}
+.balance-chip:hover{border-color:rgba(234,179,0,.28)}
+@media(max-width:760px){.balance-chip-amount{font-size:10px}}

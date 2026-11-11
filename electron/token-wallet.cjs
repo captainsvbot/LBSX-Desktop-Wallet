@@ -1030,6 +1030,7 @@ async function reconcileLocks(address, tokenId) {
 
 module.exports = {
   sendBsv, estimateBsvSendFee, sendPeerChatMessage, sendToken, mintBsv21Token, createTokenLock, claimTokenLock, getTokenLocks: reconcileLocks, migrateLegacyTokenLocks, getTokenIconData,
+  fetchCashInputs,
   _market: { fetchSpendableTokenOutput, syncSpendableBsvUtxos, broadcastRawHex },
   _test: {
     transferScript,
